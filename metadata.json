@@ -1,0 +1,5 @@
+{
+  "name": "PartsFinder Pro",
+  "description": "PartsFinder Pro is an AI-powered sourcing platform for heavy-duty automotive parts. It features a Universal Finder with multi-modal search (VIN, Image, Text), a Fleet Dashboard for owner oversight, and a secure Super Admin Mission Control for platform management and security.",
+  "requestFramePermissions": ["camera", "geolocation"]
+}

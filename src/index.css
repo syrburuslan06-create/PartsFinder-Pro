@@ -1,0 +1,121 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Inter", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-brand-primary: #3b82f6; /* Blue */
+  --color-brand-secondary: #22c55e; /* Green */
+  --color-accent: #3b82f6;
+  --color-cta: #3b82f6;
+  --color-warning: #f59e0b;
+  --color-danger: #ef4444;
+  --color-muted: #475569;
+  --color-bg: #0e1117;
+  --color-bg-dark: #0a0d13;
+  --color-surface: #181d27;
+  --color-surface-hover: #1e2535;
+  --color-input: #1a2030;
+  --color-ink: #f1f5f9;
+  --color-ink-secondary: #94a3b8;
+  --color-border: rgba(255, 255, 255, 0.07);
+  
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.3);
+  --shadow-glow-strong: 0 0 40px rgba(59, 130, 246, 0.5);
+
+  --glass-border: 1px solid rgba(255, 255, 255, 0.07);
+  --glass-bg: #181d27;
+  --glass-blur: blur(12px);
+
+  --animate-shimmer: shimmer 2s linear infinite;
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-tilt: tilt 10s infinite linear;
+  --animate-pulse-status: pulse-status 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-20px); }
+  }
+  @keyframes tilt {
+    0%, 50%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(0.5deg); }
+    75% { transform: rotate(-0.5deg); }
+  }
+  @keyframes pulse-status {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.95); }
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-bg text-ink font-body antialiased selection:bg-brand-primary selection:text-white;
+    background: #0e1117;
+    min-height: 100vh;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display font-black tracking-tighter text-ink;
+    letter-spacing: -1.5px;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-bg;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
+  }
+}
+
+@layer components {
+  .tactile-card {
+    @apply bg-surface rounded-[14px] border border-border transition-all duration-200;
+  }
+
+  .tactile-btn-dark {
+    @apply bg-white/5 text-ink font-bold px-6 py-3 rounded-lg border border-border hover:bg-white/10 active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2;
+  }
+
+  .tactile-btn-light {
+    @apply bg-brand-primary text-white font-bold px-6 py-3 rounded-lg shadow-glow hover:shadow-glow-strong active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2;
+  }
+
+  .tactile-input {
+    @apply w-full bg-input border border-border rounded-lg px-4 py-3 text-ink focus:outline-none focus:border-brand-primary/50 transition-all duration-200 placeholder:text-muted text-sm;
+  }
+
+  .tactile-pill {
+    @apply rounded-full px-6 py-2 bg-white/5 backdrop-blur-xl border border-white/10 transition-all hover:bg-white/10;
+  }
+
+  .tactile-pill-active {
+    @apply bg-white/20 text-white shadow-glow border-white/20;
+  }
+}
+
+.shimmer-effect {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
