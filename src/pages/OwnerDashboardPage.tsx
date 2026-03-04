@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, UserPlus, Clock, Search, MapPin, 
   Calendar, CreditCard, ArrowUpRight, History,
-  Activity, Shield, ExternalLink, Copy, Check, X
+  Activity, Shield, ExternalLink, Copy, Check, X, Loader2
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -97,16 +97,77 @@ const MOCK_WORKERS: WorkerActivity[] = [
   }
 ];
 
+import { supabase } from '../lib/supabase';
+
 export default function OwnerDashboardPage() {
-  const [workers] = useState<WorkerActivity[]>(MOCK_WORKERS);
+  const [workers, setWorkers] = useState<WorkerActivity[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedWorker, setSelectedWorker] = useState<WorkerActivity | null>(null);
   const [copied, setCopied] = useState(false);
   const [searchTries] = useState(() => {
     const saved = localStorage.getItem('owner_search_tries');
     return saved ? parseInt(saved) : 5;
   });
+  const companyId = localStorage.getItem('companyId');
 
-  const inviteLink = `${window.location.origin}/register/mechanic?company=fleet-alpha-99`;
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      if (!companyId) return;
+      setIsLoading(true);
+      try {
+        // 1. Fetch mechanics (profiles)
+        const { data: profiles, error: profilesError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('company_id', companyId)
+          .eq('role', 'mechanic');
+
+        if (profilesError) throw profilesError;
+
+        // 2. Fetch searches for these mechanics
+        const { data: searches, error: searchesError } = await supabase
+          .from('searches')
+          .select('*')
+          .eq('company_id', companyId)
+          .order('created_at', { ascending: false });
+
+        if (searchesError) throw searchesError;
+
+        // Map to WorkerActivity format
+        const activityMap: WorkerActivity[] = profiles.map(profile => {
+          const profileSearches = searches.filter(s => s.mechanic_id === profile.id);
+          const latestSearch = profileSearches[0];
+
+          return {
+            id: profile.id,
+            workerName: profile.full_name,
+            initial: profile.full_name.split(' ').map((n: string) => n[0]).join(''),
+            action: latestSearch ? 'PART SEARCH' : 'IDLE',
+            partSearched: latestSearch ? latestSearch.result_part_name || latestSearch.query : 'None',
+            timestamp: latestSearch ? new Date(latestSearch.created_at).toLocaleString() : 'N/A',
+            location: 'Active Hub', // Mock location as it's not in the searches table yet
+            hoursWorked: 'N/A',
+            history: profileSearches.map(s => ({
+              part: s.result_part_name || s.query,
+              time: new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              vehicle: 'Unit #', // Mock
+              status: s.result_part_number ? 'Found' : 'Searching'
+            }))
+          };
+        });
+
+        setWorkers(activityMap);
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [companyId]);
+
+  const inviteLink = `${window.location.origin}/register/mechanic?company=${companyId || 'fleet-alpha-99'}`;
 
   const copyInviteLink = () => {
     navigator.clipboard.writeText(inviteLink);
@@ -243,7 +304,12 @@ export default function OwnerDashboardPage() {
               </div>
 
               <div className="space-y-3">
-                {workers.map((worker) => (
+                {isLoading ? (
+                  <div className="py-20 text-center">
+                    <Loader2 className="animate-spin mx-auto text-brand-primary mb-4" size={32} />
+                    <p className="text-zinc-500 font-bold">Synchronizing Fleet Data...</p>
+                  </div>
+                ) : workers.map((worker) => (
                   <div 
                     key={worker.id} 
                     onClick={() => setSelectedWorker(worker)}

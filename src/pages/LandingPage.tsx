@@ -12,6 +12,7 @@ import {
 export default function LandingPage() {
   const [searchQueryIndex, setSearchQueryIndex] = useState(0);
   const [selectedWorker, setSelectedWorker] = useState<null | { name: string, initial: string, history: { part: string, time: string }[] }>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const workers = [
     { 
@@ -101,10 +102,74 @@ export default function LandingPage() {
           </nav>
 
           <div className="flex items-center gap-4">
-            <Link to="/login" className="text-[10px] font-black uppercase tracking-widest text-muted hover:text-white transition-colors px-4">Login</Link>
-            <Link to="/register" className="bg-brand-primary text-white px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-brand-primary/90 transition-all active:scale-95">Get Started</Link>
+            <div className="hidden md:flex items-center gap-4">
+              <Link to="/login" className="text-[10px] font-black uppercase tracking-widest text-muted hover:text-white transition-colors px-4">Login</Link>
+              <Link to="/register" className="bg-brand-primary text-white px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-brand-primary/90 transition-all active:scale-95">Get Started</Link>
+            </div>
+            
+            <button 
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              className="md:hidden w-10 h-10 rounded-lg bg-white/5 border border-border flex items-center justify-center text-white"
+            >
+              {isMenuOpen ? <X size={20} /> : <Layers size={20} />}
+            </button>
           </div>
         </div>
+
+        {/* Mobile Menu Dropdown */}
+        <AnimatePresence>
+          {isMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="md:hidden absolute top-full left-0 right-0 bg-bg/95 backdrop-blur-2xl border-b border-border overflow-hidden z-50"
+            >
+              <div className="p-6 flex flex-col gap-6">
+                <nav className="flex flex-col gap-4">
+                  <a 
+                    href="#features" 
+                    onClick={() => setIsMenuOpen(false)}
+                    className="text-sm font-black uppercase tracking-widest text-muted hover:text-white py-2"
+                  >
+                    Features
+                  </a>
+                  <a 
+                    href="#demo" 
+                    onClick={() => setIsMenuOpen(false)}
+                    className="text-sm font-black uppercase tracking-widest text-muted hover:text-white py-2"
+                  >
+                    Demo
+                  </a>
+                  <a 
+                    href="#pricing" 
+                    onClick={() => setIsMenuOpen(false)}
+                    className="text-sm font-black uppercase tracking-widest text-muted hover:text-white py-2"
+                  >
+                    Pricing
+                  </a>
+                </nav>
+                <div className="h-px bg-border w-full" />
+                <div className="flex flex-col gap-4">
+                  <Link 
+                    to="/login" 
+                    onClick={() => setIsMenuOpen(false)}
+                    className="text-center text-sm font-black uppercase tracking-widest text-muted hover:text-white py-4 border border-border rounded-xl"
+                  >
+                    Login
+                  </Link>
+                  <Link 
+                    to="/register" 
+                    onClick={() => setIsMenuOpen(false)}
+                    className="text-center text-sm font-black uppercase tracking-widest bg-brand-primary text-white py-4 rounded-xl"
+                  >
+                    Get Started
+                  </Link>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.header>
 
       {/* MAIN CONTENT */}
@@ -158,7 +223,7 @@ export default function LandingPage() {
                 transition={{ delay: 1.6, duration: 0.8 }}
                 className="text-xl lg:text-2xl text-ink-secondary max-w-3xl mx-auto mb-12 leading-relaxed font-medium"
               >
-                AI-powered sourcing for professional mechanics and fleet owners. Identify any part, verify fitment, compare 340+ suppliers — one screen.
+                AI-powered sourcing for professional mechanics and fleet owners. Identify any part, verify fitment, compare 200+ suppliers — one screen.
               </motion.p>
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
@@ -170,18 +235,18 @@ export default function LandingPage() {
                   Start Free 14-Day Trial
                   <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
                 </Link>
-                <button className="tactile-btn-dark px-10 py-5 text-lg">
-                  Watch Demo
-                </button>
+                <a href="#demo" className="tactile-btn-dark px-10 py-5 text-lg">
+                  See How It Works
+                </a>
               </motion.div>
             </motion.div>
           </section>
 
           {/* STATS ROW */}
           <section className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-32">
-            <StatCard index={0} label="Parts Indexed" value="2.4M+" trend="↑ 12% this month" color="text-brand-primary" />
+            <StatCard index={0} label="Parts Indexed" value="4.2M+" trend="↑ 12% this month" color="text-brand-primary" />
             <StatCard index={1} label="Fitment Accuracy" value="99.7%" trend="↑ 0.2% vs last qtr" color="text-brand-secondary" />
-            <StatCard index={2} label="Suppliers Connected" value="340+" trend="↑ 4 new this week" color="text-warning" />
+            <StatCard index={2} label="Suppliers Connected" value="200+" trend="↑ 4 new this week" color="text-warning" />
             <StatCard index={3} label="Avg. Time Saved" value="47 min" trend="Per search event" color="text-white" />
           </section>
 
@@ -303,7 +368,7 @@ export default function LandingPage() {
             >
               <FeatureCard icon={<Camera className="text-brand-primary" />} title="AI Visual Identification" desc="Identify any part from a single photo in under 8 seconds." />
               <FeatureCard icon={<CheckCircle2 className="text-brand-secondary" />} title="Fitment Compatibility" desc="100% fitment guarantee locked to your vehicle's VIN." />
-              <FeatureCard icon={<BarChart3 className="text-warning" />} title="Multi-Supplier Comparison" desc="Compare 340+ suppliers for price and local availability." />
+              <FeatureCard icon={<BarChart3 className="text-warning" />} title="Multi-Supplier Comparison" desc="Compare 200+ suppliers for price and local availability." />
               <FeatureCard icon={<Truck className="text-brand-primary" />} title="Fleet Command Dashboard" desc="Full oversight of your team's sourcing and activity." />
               <FeatureCard icon={<Bookmark className="text-brand-secondary" />} title="Digital Garage" desc="Centralized database of your fleet's specific needs." />
               <FeatureCard icon={<Zap className="text-warning" />} title="Smart Team Onboarding" desc="Invite links that automatically link mechanics to your fleet." />
@@ -324,7 +389,6 @@ export default function LandingPage() {
                 color="border-brand-primary"
                 list={[
                   "Photo → Part ID in 8s",
-                  "Voice search for hands-on work",
                   "VIN-locked results",
                   "Tech docs & torque specs",
                   "Self-Paid or Company seat"
@@ -399,7 +463,7 @@ export default function LandingPage() {
               <PricingCard 
                 title="Fleet Core" 
                 price="$89" 
-                desc="Everything in Solo + All 340+ Suppliers + Unlimited Vehicles + 5 Mechanic Seats" 
+                desc="Everything in Solo + All 200+ Suppliers + Unlimited Vehicles + 5 Mechanic Seats" 
                 btnText="Deploy Fleet Core"
                 featured
               />
@@ -451,9 +515,9 @@ export default function LandingPage() {
                   <Link to="/register" className="tactile-btn-light px-12 py-6 text-xl">
                     Start Free 14-Day Trial
                   </Link>
-                  <button className="tactile-btn-dark px-12 py-6 text-xl">
-                    Book a Demo
-                  </button>
+                  <Link to="/register" className="tactile-btn-dark px-12 py-6 text-xl">
+                    Start Free Trial
+                  </Link>
                 </div>
                 <div className="flex flex-wrap justify-center gap-10 text-[11px] font-black uppercase tracking-widest text-muted">
                   <span>✓ No credit card required</span>
@@ -576,21 +640,6 @@ export default function LandingPage() {
                 <li><a href="#features" className="hover:text-brand-primary transition-colors">Features</a></li>
                 <li><a href="#demo" className="hover:text-brand-primary transition-colors">Demo</a></li>
                 <li><a href="#pricing" className="hover:text-brand-primary transition-colors">Pricing</a></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-[10px] font-black uppercase tracking-widest text-white mb-6">Company</h4>
-              <ul className="space-y-4 text-xs font-bold text-muted">
-                <li><a href="#" className="hover:text-brand-primary transition-colors">About</a></li>
-                <li><a href="#" className="hover:text-brand-primary transition-colors">Careers</a></li>
-                <li><a href="#" className="hover:text-brand-primary transition-colors">Contact</a></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-[10px] font-black uppercase tracking-widest text-white mb-6">Legal</h4>
-              <ul className="space-y-4 text-xs font-bold text-muted">
-                <li><a href="#" className="hover:text-brand-primary transition-colors">Privacy</a></li>
-                <li><a href="#" className="hover:text-brand-primary transition-colors">Terms</a></li>
               </ul>
             </div>
           </div>

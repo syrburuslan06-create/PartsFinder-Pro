@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { searchParts, SearchResult, SearchResponse, decodeVin, VinDetails } from '../services/geminiService';
 import { PART_CATEGORIES, PartCategory } from '../constants';
 
+import { supabase } from '../lib/supabase';
+
 type VehicleType = 'car' | 'truck';
 type SearchMode = 'visual' | 'quick' | 'detailed' | 'vin' | 'manual';
 
@@ -24,6 +26,7 @@ export default function SearchForm() {
   });
   const userRole = localStorage.getItem('userRole');
   const isOwner = userRole === 'owner';
+  const companyId = localStorage.getItem('companyId');
 
   const [selectedCategory, setSelectedCategory] = useState<PartCategory | null>(null);
   const [selectedSubcategory, setSelectedSubcategory] = useState<string | null>(null);
@@ -38,6 +41,23 @@ export default function SearchForm() {
     motor: '',
     vehicleSearch: '', // Unified VIN or Name
   });
+
+  const recordSearch = async (query: string, result: SearchResult | null) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('searches').insert({
+          mechanic_id: user.id,
+          company_id: companyId || null,
+          query: query,
+          result_part_name: result?.partName || null,
+          result_part_number: result?.partNumber || null
+        });
+      }
+    } catch (error) {
+      console.error('Error recording search:', error);
+    }
+  };
 
   useEffect(() => {
     const query = searchParams.get('q');
@@ -63,6 +83,10 @@ export default function SearchForm() {
           setResults(response.results);
           setGroundingMetadata(response.groundingMetadata);
           
+          if (response.results.length > 0) {
+            recordSearch(query, response.results[0]);
+          }
+
           if (isOwner) {
             const newTries = Math.max(0, searchTries - 1);
             setSearchTries(newTries);
@@ -152,6 +176,10 @@ export default function SearchForm() {
       setResults(response.results);
       setGroundingMetadata(response.groundingMetadata);
       
+      if (response.results.length > 0) {
+        recordSearch(formData.partNumber || formData.description || formData.vehicleSearch, response.results[0]);
+      }
+
       if (isOwner) {
         const newTries = searchTries - 1;
         setSearchTries(newTries);
@@ -180,7 +208,7 @@ export default function SearchForm() {
     removePhoto();
   };
 
-  const toggleSavePart = (part: SearchResult) => {
+  const toggleSavePart = async (part: SearchResult) => {
     const saved = localStorage.getItem('saved_parts');
     let savedParts: SearchResult[] = saved ? JSON.parse(saved) : [];
     
@@ -188,12 +216,33 @@ export default function SearchForm() {
     
     if (isSaved) {
       savedParts = savedParts.filter(p => p.partNumber !== part.partNumber);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await supabase.from('saved_parts').delete().eq('mechanic_id', user.id).eq('part_number', part.partNumber);
+        }
+      } catch (error) {
+        console.error('Error deleting saved part:', error);
+      }
     } else {
       savedParts.push(part);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await supabase.from('saved_parts').insert({
+            mechanic_id: user.id,
+            part_number: part.partNumber,
+            part_name: part.partName,
+            price: parseFloat(part.price.replace(/[^0-9.]/g, '')),
+            notes: part.description
+          });
+        }
+      } catch (error) {
+        console.error('Error saving part:', error);
+      }
     }
     
     localStorage.setItem('saved_parts', JSON.stringify(savedParts));
-    // Force re-render if needed, but since it's local storage we might just rely on the icon state check
     window.dispatchEvent(new Event('storage')); 
   };
 

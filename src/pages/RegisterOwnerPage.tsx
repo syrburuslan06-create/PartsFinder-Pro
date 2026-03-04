@@ -6,6 +6,8 @@ import { supabase } from '../lib/supabase';
 
 export default function RegisterOwnerPage() {
   const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     companyName: '',
@@ -34,39 +36,63 @@ export default function RegisterOwnerPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return;
+    setIsLoading(true);
+    setError(null);
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const { data, error: signUpError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
           data: {
             full_name: formData.name,
-            company_name: formData.companyName,
             role: 'owner'
           }
         }
       });
 
-      if (error) throw error;
+      if (signUpError) throw signUpError;
 
       if (data.user) {
-        // Save user profile to Supabase 'users' table
-        await supabase.from('users').insert({
+        // 1. Create Company
+        const { data: company, error: companyError } = await supabase
+          .from('companies')
+          .insert({
+            name: formData.companyName,
+            owner_id: data.user.id,
+            seat_limit: 15,
+            plan: 'free'
+          })
+          .select()
+          .single();
+
+        if (companyError) throw companyError;
+
+        // 2. Create Profile
+        const { error: profileError } = await supabase.from('profiles').insert({
           id: data.user.id,
-          name: formData.name,
-          email: formData.email,
+          full_name: formData.name,
           role: 'owner',
-          company_name: formData.companyName,
-          created_at: new Date().toISOString()
+          company_id: company.id
         });
+
+        if (profileError) throw profileError;
 
         localStorage.setItem('userRole', 'owner');
         localStorage.setItem('userEmail', formData.email);
-        navigate('/home');
+        localStorage.setItem('companyId', company.id);
+        navigate('/owner/dashboard');
       }
     } catch (error: any) {
       console.error('Supabase Registration Error:', error);
-      alert(error.message || 'Registration failed');
+      let message = error.message || 'Registration failed';
+      if (message.includes('security purposes')) {
+        const seconds = message.match(/\d+/)?.[0] || 'some';
+        message = `Slow down! For security purposes, please wait ${seconds} seconds before trying to register again.`;
+      }
+      setError(message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -134,6 +160,15 @@ export default function RegisterOwnerPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            {error && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 rounded-xl bg-red-400/10 border border-red-400/20 text-red-400 text-sm font-medium"
+              >
+                {error}
+              </motion.div>
+            )}
             <div className="grid grid-cols-1 gap-6">
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Full Name</label>
@@ -196,10 +231,14 @@ export default function RegisterOwnerPage() {
               </div>
             </div>
 
-            <button type="submit" className="tactile-btn-light w-full py-5 text-lg group">
+            <button 
+              type="submit" 
+              disabled={isLoading}
+              className="tactile-btn-light w-full py-5 text-lg group disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               <span className="flex items-center justify-center gap-2">
-                Create Free Owner Account
-                <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                {isLoading ? 'Processing...' : 'Create Free Owner Account'}
+                {!isLoading && <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />}
               </span>
             </button>
 

@@ -8,6 +8,8 @@ export default function RegisterMechanicPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [step, setStep] = useState<'initial' | 'verify-company'>('initial');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -49,13 +51,16 @@ export default function RegisterMechanicPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return;
     if (!formData.shareLocation) {
-      alert("You must agree to share your location to register as a mechanic for your company.");
+      setError("You must agree to share your location to register as a mechanic for your company.");
       return;
     }
 
+    setIsLoading(true);
+    setError(null);
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const { data, error: signUpError } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
@@ -67,18 +72,18 @@ export default function RegisterMechanicPage() {
         }
       });
 
-      if (error) throw error;
+      if (signUpError) throw signUpError;
 
       if (data.user) {
-        // Save user profile to Supabase 'users' table
-        await supabase.from('users').insert({
+        // Save user profile to Supabase 'profiles' table
+        const { error: profileError } = await supabase.from('profiles').insert({
           id: data.user.id,
-          name: formData.name,
-          email: formData.email,
+          full_name: formData.name,
           role: 'mechanic',
-          specialization: formData.specialization,
-          created_at: new Date().toISOString()
+          company_id: formData.mode === 'company' ? formData.inviteCode : null
         });
+
+        if (profileError) throw profileError;
 
         localStorage.setItem('userRole', 'mechanic');
         localStorage.setItem('userEmail', formData.email);
@@ -122,7 +127,14 @@ export default function RegisterMechanicPage() {
       }
     } catch (error: any) {
       console.error('Supabase Registration Error:', error);
-      alert(error.message || 'Registration failed');
+      let message = error.message || 'Registration failed';
+      if (message.includes('security purposes')) {
+        const seconds = message.match(/\d+/)?.[0] || 'some';
+        message = `Slow down! For security purposes, please wait ${seconds} seconds before trying to register again.`;
+      }
+      setError(message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -220,6 +232,15 @@ export default function RegisterMechanicPage() {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-6">
+                {error && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 rounded-xl bg-red-400/10 border border-red-400/20 text-red-400 text-sm font-medium"
+                  >
+                    {error}
+                  </motion.div>
+                )}
                 <div className="grid grid-cols-1 gap-6">
                   {formData.mode === 'company' && (
                     <motion.div 
@@ -333,10 +354,14 @@ export default function RegisterMechanicPage() {
                   </div>
                 </div>
 
-                <button type="submit" className="tactile-btn-light w-full py-5 text-lg group">
+                <button 
+                  type="submit" 
+                  disabled={isLoading}
+                  className="tactile-btn-light w-full py-5 text-lg group disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <span className="flex items-center justify-center gap-2">
-                    Create Mechanic Account
-                    <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                    {isLoading ? 'Processing...' : 'Create Mechanic Account'}
+                    {!isLoading && <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />}
                   </span>
                 </button>
 

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Layers, Mail, Lock, ArrowRight, Sparkles, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
+import { Layers, Mail, Lock, ArrowRight, Sparkles, CheckCircle2, AlertTriangle, Loader2, Wrench, UserCog } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export default function LoginPage() {
@@ -43,7 +43,29 @@ export default function LoginPage() {
     navigate('/register');
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleDemoLogin = (role: 'mechanic' | 'owner' | 'admin') => {
+    setIsLoading(true);
+    setError(null);
+    
+    // Simulate a short delay for realism
+    setTimeout(() => {
+      localStorage.setItem('userEmail', role === 'admin' ? 'syrburuslan06@gmail.com' : `demo_${role}@example.com`);
+      localStorage.setItem('userRole', role);
+      
+      if (role === 'mechanic') {
+        localStorage.setItem('isPaid', 'true');
+        navigate('/home');
+      } else if (role === 'owner') {
+        localStorage.setItem('companyId', 'demo-company-123');
+        navigate('/owner/dashboard');
+      } else if (role === 'admin') {
+        navigate('/admin');
+      }
+      setIsLoading(false);
+    }, 800);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
@@ -55,51 +77,67 @@ export default function LoginPage() {
       return;
     }
 
-    // Simulate network delay for security
-    setTimeout(() => {
-      // Super Admin logic
-      if (formData.email === 'syrburuslan06@gmail.com') {
-        if (formData.password === 'admin123') { // Simple mock password for demo
-          localStorage.setItem('isGuest', 'true');
-          localStorage.setItem('userEmail', formData.email);
-          localStorage.setItem('userRole', 'admin');
-          navigate('/admin');
-        } else {
-          recordFailedAttempt(formData.email);
-          setError('Invalid credentials. Access denied.');
-        }
+    try {
+      // Super Admin logic (still mock for now, but could be moved to Supabase)
+      if (formData.email === 'syrburuslan06@gmail.com' && formData.password === 'admin123') {
+        localStorage.setItem('userEmail', formData.email);
+        localStorage.setItem('userRole', 'admin');
+        navigate('/admin');
         setIsLoading(false);
         return;
       }
 
-      // Mock validation for other users
-      if (formData.email && formData.password.length >= 6) {
-        localStorage.setItem('isGuest', 'true');
-        localStorage.setItem('userEmail', formData.email);
-        
-        const role = localStorage.getItem('userRole');
-        const isPaid = localStorage.getItem('isPaid');
-        const companyId = localStorage.getItem('companyId');
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email: formData.email,
+        password: formData.password,
+      });
 
-        if (role === 'mechanic') {
-          if (isPaid === 'true' || companyId) {
+      if (authError) throw authError;
+
+      if (data.user) {
+        // Fetch profile
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+
+        if (profileError) throw profileError;
+
+        localStorage.setItem('userEmail', formData.email);
+        localStorage.setItem('userRole', profile.role);
+        if (profile.company_id) {
+          localStorage.setItem('companyId', profile.company_id);
+          localStorage.setItem('isPaid', 'true');
+        }
+
+        if (profile.role === 'mechanic') {
+          if (profile.company_id) {
             navigate('/home');
           } else {
             navigate('/payment');
           }
-        } else if (role === 'owner') {
+        } else if (profile.role === 'owner') {
           navigate('/owner/dashboard');
-        } else if (role) {
-          navigate('/home');
+        } else if (profile.role === 'admin') {
+          navigate('/admin');
         } else {
-          navigate('/register');
+          navigate('/home');
         }
-      } else {
-        recordFailedAttempt(formData.email);
-        setError('Invalid email or password. Please try again.');
       }
+    } catch (err: any) {
+      console.error('Login error:', err);
+      recordFailedAttempt(formData.email);
+      let message = err.message || 'Invalid email or password. Please try again.';
+      if (message.includes('Email not confirmed')) {
+        message = 'Your email address has not been confirmed yet. Please check your inbox for a verification link.';
+      } else if (message.includes('Invalid login credentials')) {
+        message = 'The email or password you entered is incorrect. Please try again.';
+      }
+      setError(message);
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const recordFailedAttempt = (email: string) => {
@@ -239,6 +277,34 @@ export default function LoginPage() {
                 <div className="w-full border-t border-white/10"></div>
               </div>
               <div className="relative flex justify-center text-[10px] uppercase tracking-[0.2em] font-black">
+                <span className="bg-bg px-4 text-zinc-500">Or Demo Access</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <button 
+                type="button"
+                onClick={() => handleDemoLogin('mechanic')}
+                className="tactile-btn-dark py-3 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
+              >
+                <Wrench size={14} />
+                Demo Mechanic
+              </button>
+              <button 
+                type="button"
+                onClick={() => handleDemoLogin('owner')}
+                className="tactile-btn-dark py-3 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
+              >
+                <UserCog size={14} />
+                Demo Owner
+              </button>
+            </div>
+
+            <div className="relative py-4">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-white/10"></div>
+              </div>
+              <div className="relative flex justify-center text-[10px] uppercase tracking-[0.2em] font-black">
                 <span className="bg-bg px-4 text-zinc-500">Or continue with</span>
               </div>
             </div>
@@ -268,6 +334,9 @@ export default function LoginPage() {
           </div>
 
           <div className="mt-12 pt-8 border-t border-white/10 text-center">
+            <p className="text-zinc-500 text-[10px] font-black uppercase tracking-widest mb-4">
+              Super Admin: syrburuslan06@gmail.com / admin123
+            </p>
             <p className="text-zinc-400 font-medium">
               Don't have an account?{' '}
               <Link to="/register" className="text-white hover:text-brand-primary transition-colors font-black uppercase tracking-widest text-xs">
