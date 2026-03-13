@@ -26,84 +26,14 @@ interface WorkerActivity {
   history: WorkerHistoryItem[];
 }
 
-const MOCK_WORKERS: WorkerActivity[] = [
-  {
-    id: '1',
-    workerName: 'Alex Rivera',
-    initial: 'AR',
-    action: 'PART SEARCH',
-    partSearched: 'Mack V8 Fuel Injector',
-    timestamp: '2026-02-25 14:30',
-    location: 'Chicago Hub - Sector 4',
-    hoursWorked: '6.5 hrs',
-    history: [
-      { part: 'Mack V8 Fuel Injector', time: '14:30', vehicle: 'Unit #102', status: 'Found' },
-      { part: 'Oil Filter — Cummins ISX15', time: '12:15', vehicle: 'Unit #102', status: 'Ordered' },
-      { part: 'Turbocharger Gasket Kit', time: '09:45', vehicle: 'Unit #205', status: 'Found' }
-    ]
-  },
-  {
-    id: '2',
-    workerName: 'Sarah Chen',
-    initial: 'SC',
-    action: 'PART SEARCH',
-    partSearched: 'Peterbilt Alternator',
-    timestamp: '2026-02-25 11:15',
-    location: 'Detroit Service Center',
-    hoursWorked: '4.2 hrs',
-    history: [
-      { part: 'Peterbilt Alternator', time: '11:15', vehicle: 'Unit #402', status: 'Verified' },
-      { part: 'V8 Fuel Injector', time: '08:30', vehicle: 'Unit #402', status: 'Found' }
-    ]
-  },
-  {
-    id: '3',
-    workerName: 'Marcus Thorne',
-    initial: 'MT',
-    action: 'VIN DECODE',
-    partSearched: 'Freightliner Cascadia',
-    timestamp: '2026-02-25 10:45',
-    location: 'Houston Logistics Hub',
-    hoursWorked: '3.8 hrs',
-    history: [
-      { part: 'VIN: 1FUJA6BV9GLXXXXXX', time: '10:45', vehicle: 'Unit #882', status: 'Decoded' }
-    ]
-  },
-  {
-    id: '4',
-    workerName: 'Elena Vance',
-    initial: 'EV',
-    action: 'PART SEARCH',
-    partSearched: 'Kenworth T680 Radiator',
-    timestamp: '2026-02-25 09:20',
-    location: 'Seattle Port Terminal',
-    hoursWorked: '5.1 hrs',
-    history: [
-      { part: 'Radiator Assembly', time: '09:20', vehicle: 'Unit #551', status: 'Found' }
-    ]
-  },
-  {
-    id: '5',
-    workerName: 'David Kim',
-    initial: 'DK',
-    action: 'PART SEARCH',
-    partSearched: 'Volvo D13 Turbo',
-    timestamp: '2026-02-25 08:10',
-    location: 'Atlanta Distribution',
-    hoursWorked: '2.4 hrs',
-    history: [
-      { part: 'Turbocharger', time: '08:10', vehicle: 'Unit #339', status: 'Ordered' }
-    ]
-  }
-];
-
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export default function OwnerDashboardPage() {
   const [workers, setWorkers] = useState<WorkerActivity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedWorker, setSelectedWorker] = useState<WorkerActivity | null>(null);
   const [copied, setCopied] = useState(false);
+  const [ownerName, setOwnerName] = useState('Fleet Manager');
   const [searchTries] = useState(() => {
     const saved = localStorage.getItem('owner_search_tries');
     return saved ? parseInt(saved) : 5;
@@ -112,9 +42,25 @@ export default function OwnerDashboardPage() {
 
   useEffect(() => {
     const fetchDashboardData = async () => {
-      if (!companyId) return;
+      if (!companyId || !isSupabaseConfigured) {
+        setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
       try {
+        // Fetch owner name
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', user.id)
+            .single();
+          if (profile?.full_name) {
+            setOwnerName(profile.full_name);
+          }
+        }
+
         // 1. Fetch mechanics (profiles)
         const { data: profiles, error: profilesError } = await supabase
           .from('profiles')
@@ -184,7 +130,7 @@ export default function OwnerDashboardPage() {
             <h1 className="text-3xl lg:text-5xl font-display font-black text-white tracking-tighter uppercase leading-none">
               FLEET <span className="text-brand-primary italic">OVERVIEW.</span>
             </h1>
-            <p className="text-zinc-500 text-xs font-bold mt-2 uppercase tracking-widest">Welcome back, Fleet Manager</p>
+            <p className="text-zinc-500 text-xs font-bold mt-2 uppercase tracking-widest">Welcome back, {ownerName}</p>
           </div>
 
           <div className="flex flex-wrap gap-3 lg:gap-4">

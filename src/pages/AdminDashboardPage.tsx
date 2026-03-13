@@ -4,8 +4,9 @@ import {
   Users, Building2, Clock, Search, ShieldAlert, 
   Trash2, Ban, CheckCircle2, BarChart3, TrendingUp,
   Activity, ArrowUpRight, X, Filter, MoreVertical,
-  ShieldCheck, AlertTriangle
+  ShieldCheck, AlertTriangle, Loader2
 } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 interface PlatformStats {
   totalUsers: number;
@@ -35,19 +36,6 @@ interface MechanicRecord {
   lastActive: string;
 }
 
-const MOCK_COMPANIES: CompanyRecord[] = [
-  { id: 'c1', name: 'Fleet Alpha', ownerName: 'John Doe', email: 'john@fleetalpha.com', status: 'active', joinedDate: '2026-01-15', seats: 5 },
-  { id: 'c2', name: 'Truck Masters', ownerName: 'Jane Smith', email: 'jane@truckmasters.net', status: 'active', joinedDate: '2026-02-01', seats: 12 },
-  { id: 'c3', name: 'Logistics Pro', ownerName: 'Mike Ross', email: 'mike@logpro.com', status: 'blocked', joinedDate: '2026-02-10', seats: 3 },
-];
-
-const MOCK_MECHANICS: MechanicRecord[] = [
-  { id: 'm1', name: 'Alex Rivera', company: 'Fleet Alpha', email: 'alex@fleetalpha.com', hoursThisWeek: 38, hoursThisMonth: 152, lastActive: '2 mins ago' },
-  { id: 'm2', name: 'Sarah Chen', company: 'Fleet Alpha', email: 'sarah@fleetalpha.com', hoursThisWeek: 42, hoursThisMonth: 168, lastActive: '11 mins ago' },
-  { id: 'm3', name: 'Dan King', company: 'Truck Masters', email: 'dan@truckmasters.net', hoursThisWeek: 35, hoursThisMonth: 140, lastActive: '1 hour ago' },
-  { id: 'm4', name: 'Mike Smith', company: 'Truck Masters', email: 'mike.s@truckmasters.net', hoursThisWeek: 40, hoursThisMonth: 160, lastActive: '3 hours ago' },
-];
-
 interface AuditLog {
   id: string;
   user: string;
@@ -56,26 +44,114 @@ interface AuditLog {
   timestamp: string;
 }
 
-const MOCK_AUDIT_LOGS: AuditLog[] = [
-  { id: 'l1', user: 'Alex Rivera', action: 'SEARCH', target: 'Mack V8 Injector', timestamp: '14:30:22' },
-  { id: 'l2', user: 'Sarah Chen', action: 'SAVE', target: 'Peterbilt Alternator', timestamp: '14:28:15' },
-  { id: 'l3', user: 'John Doe', action: 'INVITE', target: 'Mechanic #4', timestamp: '14:25:00' },
-  { id: 'l4', user: 'System', action: 'BACKUP', target: 'Database Core', timestamp: '14:00:00' },
-];
-
 export default function AdminDashboardPage() {
-  const [companies, setCompanies] = useState<CompanyRecord[]>(MOCK_COMPANIES);
-  const [mechanics, setMechanics] = useState<MechanicRecord[]>(MOCK_MECHANICS);
-  const [auditLogs] = useState<AuditLog[]>(MOCK_AUDIT_LOGS);
-  const [securityLogs, setSecurityLogs] = useState<any[]>(() => {
-    return JSON.parse(localStorage.getItem('security_logs') || '[]');
-  });
+  const [companies, setCompanies] = useState<CompanyRecord[]>([]);
+  const [mechanics, setMechanics] = useState<MechanicRecord[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [securityLogs, setSecurityLogs] = useState<any[]>([]);
   const [isLockdown, setIsLockdown] = useState(() => {
     return localStorage.getItem('system_lockdown') === 'true';
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [adminTimer, setAdminTimer] = useState(0);
   const [activeTab, setActiveTab] = useState<'companies' | 'mechanics' | 'logs' | 'security'>('companies');
+
+  useEffect(() => {
+    async function fetchAdminData() {
+      setIsLoading(true);
+      if (!isSupabaseConfigured) {
+        setCompanies([]);
+        setMechanics([]);
+        setAuditLogs([]);
+        setIsLoading(false);
+        return;
+      }
+      try {
+        // Fetch companies
+        const { data: companiesData, error: companiesError } = await supabase
+          .from('companies')
+          .select('*, profiles!companies_owner_id_fkey(full_name, email)');
+
+        if (companiesError) throw companiesError;
+
+        const formattedCompanies: CompanyRecord[] = companiesData.map(c => ({
+          id: c.id,
+          name: c.name,
+          ownerName: c.profiles?.full_name || 'Unknown',
+          email: c.profiles?.email || 'Unknown',
+          status: 'active', // Assuming active for now, could add a status column
+          joinedDate: new Date(c.created_at).toLocaleDateString(),
+          seats: c.seat_limit || 0
+        }));
+        setCompanies(formattedCompanies);
+
+        // Fetch mechanics
+        const { data: mechanicsData, error: mechanicsError } = await supabase
+          .from('profiles')
+          .select('*, companies(name)')
+          .eq('role', 'mechanic');
+
+        if (mechanicsError) throw mechanicsError;
+
+        const formattedMechanics: MechanicRecord[] = mechanicsData.map(m => ({
+          id: m.id,
+          name: m.full_name || 'Unknown',
+          company: m.companies?.name || 'Independent',
+          email: m.email || 'Unknown',
+          hoursThisWeek: 0, // Mock for now
+          hoursThisMonth: 0, // Mock for now
+          lastActive: new Date(m.created_at).toLocaleDateString() // Using created_at as a fallback
+        }));
+        setMechanics(formattedMechanics);
+
+        // Fetch audit logs (searches)
+        const { data: searchesData, error: searchesError } = await supabase
+          .from('searches')
+          .select('*, profiles(full_name)')
+          .order('created_at', { ascending: false })
+          .limit(50);
+          
+        if (searchesError) throw searchesError;
+        
+        const formattedLogs: AuditLog[] = searchesData.map(s => ({
+          id: s.id,
+          user: s.profiles?.full_name || 'Unknown',
+          action: 'SEARCH',
+          target: s.query,
+          timestamp: new Date(s.created_at).toLocaleTimeString()
+        }));
+        setAuditLogs(formattedLogs);
+
+        // Fetch security logs
+        const { data: securityData, error: securityError } = await supabase
+          .from('security_events')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(50);
+
+        if (securityError) throw securityError;
+
+        const formattedSecurityLogs = securityData.map(s => ({
+          id: s.id,
+          email: s.email_tried || 'Unknown',
+          ip: s.ip_address || 'Unknown',
+          type: s.event_type,
+          severity: s.severity,
+          details: s.details,
+          timestamp: new Date(s.created_at).toLocaleString()
+        }));
+        setSecurityLogs(formattedSecurityLogs);
+
+      } catch (error) {
+        console.error('Error fetching admin data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    fetchAdminData();
+  }, []);
 
   const toggleLockdown = () => {
     const newState = !isLockdown;
@@ -85,7 +161,6 @@ export default function AdminDashboardPage() {
 
   const clearSecurityLogs = () => {
     setSecurityLogs([]);
-    localStorage.removeItem('security_logs');
   };
 
   // Admin Session Timer
@@ -124,6 +199,14 @@ export default function AdminDashboardPage() {
     m.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
     m.company.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-bg">
+        <Loader2 className="w-8 h-8 text-brand-primary animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-bg pt-8 pb-20 px-6">
@@ -332,12 +415,16 @@ export default function AdminDashboardPage() {
                         <p className="text-[10px] text-zinc-500 font-medium">IP: {log.ip}</p>
                       </td>
                       <td className="px-6 py-6">
-                        <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase border text-red-400 border-red-400/30 bg-red-400/10">
+                        <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase border ${
+                          log.severity === 'critical' ? 'text-red-400 border-red-400/30 bg-red-400/10' :
+                          log.severity === 'warning' ? 'text-amber-400 border-amber-400/30 bg-amber-400/10' :
+                          'text-emerald-400 border-emerald-400/30 bg-emerald-400/10'
+                        }`}>
                           {log.type}
                         </span>
                       </td>
                       <td className="px-6 py-6">
-                        <p className="text-xs font-bold text-white">Unauthorized Access Attempt</p>
+                        <p className="text-xs font-bold text-white">{log.details ? JSON.stringify(log.details) : 'No details'}</p>
                         <p className="text-[10px] text-zinc-500">{log.timestamp}</p>
                       </td>
                       <td className="px-6 py-6 text-right">

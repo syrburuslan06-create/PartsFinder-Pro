@@ -1,18 +1,21 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Layers, Mail, Lock, ArrowRight, Sparkles, CheckCircle2, AlertTriangle, Loader2, Wrench, UserCog } from 'lucide-react';
+import { Layers, Mail, Lock, ArrowRight, Sparkles, CheckCircle2, AlertTriangle, Loader2, Wrench, UserCog, Check } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [formData, setFormData] = useState({
     email: '',
     password: ''
   });
 
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(location.state?.message || null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   const handleGoogleLogin = async () => {
     const isLockdown = localStorage.getItem('system_lockdown') === 'true';
@@ -43,7 +46,7 @@ export default function LoginPage() {
     navigate('/register');
   };
 
-  const handleDemoLogin = (role: 'mechanic' | 'owner' | 'admin') => {
+  const handleDemoLogin = (role: 'mechanic' | 'owner' | 'admin' | 'supplier') => {
     setIsLoading(true);
     setError(null);
     
@@ -52,49 +55,142 @@ export default function LoginPage() {
       localStorage.setItem('userEmail', role === 'admin' ? 'syrburuslan06@gmail.com' : `demo_${role}@example.com`);
       localStorage.setItem('userRole', role);
       
+      const from = location.state?.from?.pathname;
+      
       if (role === 'mechanic') {
         localStorage.setItem('isPaid', 'true');
-        navigate('/home');
+        navigate(from || '/home');
       } else if (role === 'owner') {
         localStorage.setItem('companyId', 'demo-company-123');
-        navigate('/owner/dashboard');
+        navigate(from || '/owner/dashboard');
+      } else if (role === 'supplier') {
+        navigate(from || '/supplier/dashboard');
       } else if (role === 'admin') {
-        navigate('/admin');
+        navigate(from || '/admin');
       }
       setIsLoading(false);
     }, 800);
+  };
+
+  const handleForgotPassword = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!formData.email) {
+      setError('Please enter your email address first.');
+      return;
+    }
+    
+    if (!isSupabaseConfigured) {
+      setError('Supabase is not configured.');
+      return;
+    }
+
+    setIsResetting(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(formData.email, {
+        redirectTo: `${window.location.origin}/login`,
+      });
+
+      if (error) throw error;
+      setSuccess('Password reset email sent. Please check your inbox.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to send reset email.');
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError(null);
+    setSuccess(null);
 
+    const normalizedEmail = formData.email.toLowerCase().trim();
     const isLockdown = localStorage.getItem('system_lockdown') === 'true';
-    if (isLockdown && formData.email !== 'syrburuslan06@gmail.com') {
+    if (isLockdown && normalizedEmail !== 'syrburuslan06@gmail.com') {
       setError('System security lockdown active. Only Super Admin access permitted.');
       setIsLoading(false);
       return;
     }
 
+    const from = location.state?.from?.pathname;
+
     try {
       // Super Admin logic (still mock for now, but could be moved to Supabase)
-      if (formData.email === 'syrburuslan06@gmail.com' && formData.password === 'admin123') {
-        localStorage.setItem('userEmail', formData.email);
-        localStorage.setItem('userRole', 'admin');
-        navigate('/admin');
+      if (normalizedEmail === 'syrburuslan06@gmail.com' && formData.password === 'admin123') {
+        localStorage.setItem('userEmail', normalizedEmail);
+        localStorage.setItem('userRole', 'super_admin');
+        localStorage.setItem('currentUser', JSON.stringify({ name: 'Super Admin', email: normalizedEmail, role: 'super_admin' }));
+        navigate(from || '/admin');
         setIsLoading(false);
         return;
       }
 
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email: formData.email,
-        password: formData.password,
+      if (!isSupabaseConfigured) {
+        throw new Error('Supabase is not configured. Please use demo login.');
+      }
+
+      // Fallback for demo users
+      if (normalizedEmail.startsWith('demo_')) {
+        const role = normalizedEmail.includes('owner') ? 'owner' : normalizedEmail.includes('supplier') ? 'supplier' : 'mechanic';
+        localStorage.setItem('userEmail', normalizedEmail);
+        localStorage.setItem('userRole', role);
+        localStorage.setItem('currentUser', JSON.stringify({ name: 'Demo User', email: normalizedEmail, role }));
+        if (role === 'owner') {
+          localStorage.setItem('companyId', 'demo-company-123');
+          navigate(from || '/owner/dashboard');
+        } else if (role === 'supplier') {
+          navigate(from || '/supplier/dashboard');
+        } else {
+          localStorage.setItem('isPaid', 'true');
+          navigate(from || '/home');
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      // Use secure backend proxy for login to enforce rate limits and logging
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password: formData.password,
+        }),
       });
 
-      if (authError) throw authError;
+      let data;
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.indexOf("application/json") !== -1) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        console.error("Non-JSON response:", text);
+        throw new Error("Server returned an invalid response. Please try again later.");
+      }
 
-      if (data.user) {
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to sign in');
+      }
+
+      // Set session in Supabase client
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const { user } = data;
+
+      if (user) {
         // Fetch profile
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
@@ -104,21 +200,30 @@ export default function LoginPage() {
 
         if (profileError) throw profileError;
 
-        localStorage.setItem('userEmail', formData.email);
+        localStorage.setItem('userEmail', normalizedEmail);
         localStorage.setItem('userRole', profile.role);
-        if (profile.company_id) {
-          localStorage.setItem('companyId', profile.company_id);
+        localStorage.setItem('currentUser', JSON.stringify({
+          name: profile.full_name || data.user.email?.split('@')[0] || 'User',
+          email: normalizedEmail,
+          role: profile.role
+        }));
+        if (profile.company_id || profile.is_paid) {
+          if (profile.company_id) localStorage.setItem('companyId', profile.company_id);
           localStorage.setItem('isPaid', 'true');
         }
 
-        if (profile.role === 'mechanic') {
-          if (profile.company_id) {
+        if (from) {
+          navigate(from);
+        } else if (profile.role === 'mechanic') {
+          if (profile.company_id || profile.is_paid) {
             navigate('/home');
           } else {
             navigate('/payment');
           }
         } else if (profile.role === 'owner') {
           navigate('/owner/dashboard');
+        } else if (profile.role === 'supplier') {
+          navigate('/supplier/dashboard');
         } else if (profile.role === 'admin') {
           navigate('/admin');
         } else {
@@ -127,12 +232,11 @@ export default function LoginPage() {
       }
     } catch (err: any) {
       console.error('Login error:', err);
-      recordFailedAttempt(formData.email);
       let message = err.message || 'Invalid email or password. Please try again.';
       if (message.includes('Email not confirmed')) {
         message = 'Your email address has not been confirmed yet. Please check your inbox for a verification link.';
       } else if (message.includes('Invalid login credentials')) {
-        message = 'The email or password you entered is incorrect. Please try again.';
+        message = 'Invalid email or password. If you recently registered, please ensure you have confirmed your email address.';
       }
       setError(message);
     } finally {
@@ -140,24 +244,13 @@ export default function LoginPage() {
     }
   };
 
-  const recordFailedAttempt = (email: string) => {
-    const logs = JSON.parse(localStorage.getItem('security_logs') || '[]');
-    logs.unshift({
-      id: Math.random().toString(36).substr(2, 9),
-      type: 'FAILED_LOGIN',
-      email: email || 'Unknown',
-      ip: `192.168.1.${Math.floor(Math.random() * 255)}`,
-      timestamp: new Date().toLocaleTimeString()
-    });
-    localStorage.setItem('security_logs', JSON.stringify(logs.slice(0, 20)));
-  };
-
   return (
-    <div className="min-h-screen bg-bg flex pt-20 lg:pt-0 relative overflow-hidden">
+    <div className="min-h-screen bg-bg flex pt-32 lg:pt-0 relative overflow-hidden">
       {/* Background Elements */}
-      <div className="absolute inset-0 -z-10">
+      <div className="absolute inset-0 -z-10 pointer-events-none">
         <div className="absolute top-0 left-1/4 w-[800px] h-[800px] bg-brand-primary/5 blur-[160px] rounded-full animate-pulse-slow" />
         <div className="absolute bottom-0 right-1/4 w-[800px] h-[800px] bg-cta/5 blur-[160px] rounded-full animate-pulse-slow" style={{ animationDelay: '2s' }} />
+        <div className="absolute inset-0 opacity-10 bg-grid mask-fade-y" />
       </div>
 
       {/* Left Side - Visual/Editorial */}
@@ -195,15 +288,6 @@ export default function LoginPage() {
 
       {/* Right Side - Form */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-24 relative min-h-[calc(100vh-5rem)] lg:min-h-screen z-10">
-        <div className="absolute top-8 left-8 lg:hidden">
-          <Link to="/" className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-brand-primary flex items-center justify-center shadow-glow">
-              <Layers className="text-white" size={24} />
-            </div>
-            <span className="text-xl font-display font-black tracking-tighter text-white">PF PRO</span>
-          </Link>
-        </div>
-
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -228,6 +312,17 @@ export default function LoginPage() {
                   {error}
                 </motion.div>
               )}
+              {success && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3 text-emerald-500 text-xs font-bold"
+                >
+                  <CheckCircle2 size={16} />
+                  {success}
+                </motion.div>
+              )}
             </AnimatePresence>
 
             <div className="grid grid-cols-1 gap-6">
@@ -249,7 +344,14 @@ export default function LoginPage() {
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Password</label>
-                  <a href="#" className="text-[10px] font-black text-zinc-500 hover:text-white transition-colors uppercase tracking-widest">Forgot?</a>
+                  <button 
+                    type="button"
+                    onClick={handleForgotPassword}
+                    disabled={isResetting}
+                    className="text-[10px] font-black text-zinc-500 hover:text-white transition-colors uppercase tracking-widest disabled:opacity-50"
+                  >
+                    {isResetting ? 'Sending...' : 'Forgot?'}
+                  </button>
                 </div>
                 <div className="relative group">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-white transition-colors" size={18} />
@@ -281,14 +383,14 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="grid grid-cols-3 gap-4 mb-4">
               <button 
                 type="button"
                 onClick={() => handleDemoLogin('mechanic')}
                 className="tactile-btn-dark py-3 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
               >
                 <Wrench size={14} />
-                Demo Mechanic
+                Demo Indiv
               </button>
               <button 
                 type="button"
@@ -297,6 +399,14 @@ export default function LoginPage() {
               >
                 <UserCog size={14} />
                 Demo Owner
+              </button>
+              <button 
+                type="button"
+                onClick={() => handleDemoLogin('supplier')}
+                className="tactile-btn-dark py-3 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
+              >
+                <Layers size={14} />
+                Demo Suppl
               </button>
             </div>
 

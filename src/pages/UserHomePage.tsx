@@ -8,18 +8,87 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { SearchResult } from '../services/geminiService';
+import { useAppContext } from '../contexts/AppContext';
+
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export default function UserHomePage() {
   const navigate = useNavigate();
+  const { savedParts } = useAppContext();
   const [quickSearch, setQuickSearch] = useState('');
-  const [savedParts, setSavedParts] = useState<SearchResult[]>([]);
+  const [userName, setUserName] = useState('OPERATOR');
+  const [totalSearches, setTotalSearches] = useState(0);
+  const [hoursActive, setHoursActive] = useState(0);
+  const [plan, setPlan] = useState('Free Trial');
+  const [isPaid, setIsPaid] = useState(false);
+  const [nextPayment, setNextPayment] = useState('N/A');
   const userRole = localStorage.getItem('userRole') || 'mechanic';
 
   useEffect(() => {
-    const saved = localStorage.getItem('saved_parts');
-    if (saved) {
-      setSavedParts(JSON.parse(saved).slice(0, 2)); // Show top 2 for compact view
-    }
+    const fetchUserData = async () => {
+      if (!isSupabaseConfigured) return;
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          // Get profile
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+            
+          if (profile) {
+            setUserName(profile.full_name?.split(' ')[0] || user.email?.split('@')[0] || 'OPERATOR');
+            setPlan(profile.plan === 'director' ? 'Director' : profile.is_paid ? 'Professional' : 'Free Trial');
+            setIsPaid(profile.is_paid || false);
+            
+            if (profile.next_payment_date) {
+              const date = new Date(profile.next_payment_date);
+              setNextPayment(date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }));
+            }
+          }
+
+          // Get search count
+          const { count: searchCount } = await supabase
+            .from('search_history')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', user.id);
+            
+          if (searchCount !== null) {
+            setTotalSearches(searchCount);
+          }
+
+          // Get hours active
+          try {
+            const { data: sessions, error: sessionError } = await supabase
+              .from('user_sessions')
+              .select('duration_minutes')
+              .eq('user_id', user.id);
+              
+            if (!sessionError && sessions) {
+              const totalMinutes = sessions.reduce((acc, curr) => acc + (curr.duration_minutes || 0), 0);
+              setHoursActive(Math.round((totalMinutes / 60) * 10) / 10);
+            } else if (sessionError && sessionError.code === '42P01') {
+              // Table doesn't exist, we can't create it from client, just set to 0
+              setHoursActive(0);
+            } else if (sessions && sessions.length === 0) {
+              // Create initial session
+              await supabase.from('user_sessions').insert({
+                user_id: user.id,
+                started_at: new Date().toISOString(),
+                duration_minutes: 0
+              });
+            }
+          } catch (e) {
+            console.error('Error fetching sessions:', e);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching user data:', error);
+      }
+    };
+    
+    fetchUserData();
   }, []);
 
   const handleQuickSearch = (e: React.FormEvent) => {
@@ -41,8 +110,8 @@ export default function UserHomePage() {
               <Sparkles size={10} className="animate-pulse" />
               Operational Core Active
             </div>
-            <h1 className="text-3xl lg:text-5xl font-display font-black text-white tracking-tighter leading-none">
-              HELLO, <span className="text-brand-primary italic">OPERATOR.</span>
+            <h1 className="text-3xl lg:text-5xl font-display font-black text-white tracking-tighter leading-none uppercase">
+              HELLO, <span className="text-brand-primary italic">{userName}.</span>
             </h1>
           </div>
 
@@ -53,7 +122,7 @@ export default function UserHomePage() {
               </div>
               <div>
                 <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Next Payment</p>
-                <p className="text-base font-black text-white">March 15, 2026</p>
+                <p className="text-base font-black text-white">{nextPayment}</p>
               </div>
               <Link to="/payment" className="ml-2 p-2 rounded-lg bg-brand-primary/20 text-brand-primary hover:bg-brand-primary hover:text-white transition-all">
                 <CreditCard size={16} />
@@ -108,15 +177,15 @@ export default function UserHomePage() {
                 <StatCard 
                   icon={<Search size={18} />} 
                   label="Total Searches" 
-                  value="1,284" 
-                  subValue="+12% vs last month"
+                  value={totalSearches.toString()} 
+                  subValue="Lifetime"
                   color="text-brand-primary"
                 />
                 <StatCard 
                   icon={<Clock size={18} />} 
                   label="Hours Active" 
-                  value="42.5h" 
-                  subValue="Current cycle"
+                  value={`${hoursActive}h`} 
+                  subValue="Lifetime"
                   color="text-emerald-500"
                 />
               </div>
@@ -130,13 +199,13 @@ export default function UserHomePage() {
               <div className="space-y-3">
                 <div className="flex justify-between items-center p-3 rounded-xl bg-white/5 border border-white/10">
                   <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">Plan</span>
-                  <span className="text-xs font-black text-white uppercase">Professional</span>
+                  <span className="text-xs font-black text-white uppercase">{plan}</span>
                 </div>
                 <div className="flex justify-between items-center p-3 rounded-xl bg-white/5 border border-white/10">
                   <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">Status</span>
-                  <span className="text-[9px] font-black text-emerald-500 uppercase flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Active
+                  <span className={`text-[9px] font-black uppercase flex items-center gap-2 ${isPaid ? 'text-emerald-500' : 'text-amber-500'}`}>
+                    <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${isPaid ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                    {isPaid ? 'Active' : 'Trial'}
                   </span>
                 </div>
               </div>

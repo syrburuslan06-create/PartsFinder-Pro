@@ -1,34 +1,57 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Search, Menu, X, Layers, Users, Globe, Activity } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 export default function PublicLayout({ children }: { children: React.ReactNode }) {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleNav = (id: string) => {
+    if (location.pathname !== '/') {
+      navigate('/#' + id);
+    } else {
+      const el = document.getElementById(id);
+      if (el) {
+        const offset = 140; // Increased offset to prevent header overlap
+        const elementPosition = el.getBoundingClientRect().top;
+        const offsetPosition = elementPosition + window.pageYOffset - offset;
+
+        window.scrollTo({
+          top: offsetPosition,
+          behavior: 'smooth'
+        });
+      }
+    }
+    setIsMenuOpen(false);
+  };
 
   return (
     <div className="min-h-screen bg-bg text-ink selection:bg-brand-primary selection:text-white relative overflow-hidden">
       {/* Navigation */}
       <nav className="fixed top-8 left-0 right-0 h-20 z-[100] px-6">
-        <div className="max-w-7xl mx-auto h-full flex items-center justify-between tactile-card px-8 rounded-full border-white/10">
+        <div className="max-w-7xl mx-auto h-full flex items-center justify-between tactile-card px-8 rounded-full border-white/10 bg-bg/50 backdrop-blur-xl">
           <Link to="/" className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-brand-primary flex items-center justify-center shadow-glow">
               <Layers className="text-white" size={24} />
             </div>
-            <span className="text-xl font-display font-black tracking-tighter text-white">PF PRO</span>
+            <span className="text-xl font-display font-black tracking-tighter text-white">PFPRO</span>
           </Link>
 
           {/* Desktop Nav */}
-          <div className="hidden md:flex items-center gap-8 text-[10px] font-black uppercase tracking-widest text-zinc-500">
-            <a href="#features" className="hover:text-white transition-colors">Features</a>
-            <a href="#matrix" className="hover:text-white transition-colors">The Matrix</a>
-            <a href="#pricing" className="hover:text-white transition-colors">Pricing</a>
-            <a href="#faq" className="hover:text-white transition-colors">FAQ</a>
+          <div className="hidden md:flex items-center gap-10 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">
+            <button onClick={() => handleNav('how-it-works')} className="hover:text-white transition-colors uppercase cursor-pointer">HOW IT WORKS</button>
+            <button onClick={() => handleNav('pillars')} className="hover:text-white transition-colors uppercase cursor-pointer">ECONOMIC PILLARS</button>
+            <button onClick={() => handleNav('features')} className="hover:text-white transition-colors uppercase cursor-pointer">FEATURES</button>
+            <button onClick={() => handleNav('pricing')} className="hover:text-white transition-colors uppercase cursor-pointer">PRICING</button>
+            <button onClick={() => handleNav('about-us')} className="hover:text-white transition-colors uppercase cursor-pointer">ABOUT US</button>
           </div>
 
-          <div className="hidden md:flex items-center gap-4">
-            <Link to="/login" className="text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-colors">Login</Link>
-            <Link to="/register" className="tactile-btn-light px-6 py-2.5 text-[10px]">
-              Get Started
+          <div className="hidden md:flex items-center gap-8">
+            <Link to="/login" className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 hover:text-white transition-colors">LOGIN</Link>
+            <Link to="/register" className="tactile-btn-light px-8 py-3 text-[10px] uppercase tracking-widest">
+              GET STARTED
             </Link>
           </div>
 
@@ -40,19 +63,32 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
 
         {/* Mobile Nav */}
         {isMenuOpen && (
-          <div className="md:hidden mt-4 tactile-card p-8 space-y-6 border-white/10">
-            <a href="#features" className="block text-lg font-bold text-zinc-400" onClick={() => setIsMenuOpen(false)}>Features</a>
-            <a href="#matrix" className="block text-lg font-bold text-zinc-400" onClick={() => setIsMenuOpen(false)}>The Matrix</a>
-            <a href="#pricing" className="block text-lg font-bold text-zinc-400" onClick={() => setIsMenuOpen(false)}>Pricing</a>
-            <a href="#faq" className="block text-lg font-bold text-zinc-400" onClick={() => setIsMenuOpen(false)}>FAQ</a>
+          <div className="md:hidden mt-4 tactile-card p-8 space-y-6 border-white/10 bg-bg/90 backdrop-blur-xl rounded-3xl">
+            <button onClick={() => handleNav('how-it-works')} className="block w-full text-left text-lg font-black uppercase tracking-tight text-zinc-400">HOW IT WORKS</button>
+            <button onClick={() => handleNav('pillars')} className="block w-full text-left text-lg font-black uppercase tracking-tight text-zinc-400">ECONOMIC PILLARS</button>
+            <button onClick={() => handleNav('features')} className="block w-full text-left text-lg font-black uppercase tracking-tight text-zinc-400">FEATURES</button>
+            <button onClick={() => handleNav('pricing')} className="block w-full text-left text-lg font-black uppercase tracking-tight text-zinc-400">PRICING</button>
+            <button onClick={() => handleNav('about-us')} className="block w-full text-left text-lg font-black uppercase tracking-tight text-zinc-400">ABOUT US</button>
             <hr className="border-white/10" />
-            <Link to="/login" className="block text-lg font-bold text-white" onClick={() => setIsMenuOpen(false)}>Login</Link>
-            <Link to="/register" className="tactile-btn-light w-full py-4 rounded-xl text-center" onClick={() => setIsMenuOpen(false)}>Get Started</Link>
+            <Link to="/login" className="block text-lg font-black uppercase tracking-tight text-white" onClick={() => setIsMenuOpen(false)}>LOGIN</Link>
+            <Link to="/register" className="tactile-btn-light w-full py-4 rounded-xl text-center uppercase tracking-widest text-xs" onClick={() => setIsMenuOpen(false)}>GET STARTED</Link>
           </div>
         )}
       </nav>
 
-      <main>{children}</main>
+      <main>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.15 }}
+          >
+            {children}
+          </motion.div>
+        </AnimatePresence>
+      </main>
 
       {/* Footer */}
       <footer className="py-24 px-6 border-t border-white/10 bg-bg">
@@ -63,7 +99,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
                 <div className="w-12 h-12 rounded-xl bg-brand-primary flex items-center justify-center shadow-glow">
                   <Layers className="text-white" size={28} />
                 </div>
-                <span className="text-2xl font-display font-black tracking-tighter text-white">PF PRO</span>
+                <span className="text-2xl font-display font-black tracking-tighter text-white">PFPRO</span>
               </div>
               <p className="text-zinc-400 text-lg max-w-sm leading-relaxed font-medium">
                 The world's most advanced parts sourcing platform for professional fleets and mechanics.
@@ -72,23 +108,23 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
             <div>
               <h4 className="text-white font-black text-xs uppercase tracking-[0.2em] mb-8">Platform</h4>
               <ul className="space-y-4 text-zinc-500 font-bold text-sm">
-                <li><a href="#features" className="hover:text-white transition-colors">Neural Search</a></li>
-                <li><a href="#matrix" className="hover:text-white transition-colors">Matrix Feed</a></li>
-                <li><a href="#pricing" className="hover:text-white transition-colors">Pricing</a></li>
-                <li><a href="#faq" className="hover:text-white transition-colors">FAQ</a></li>
+                <li><button onClick={() => handleNav('features')} className="hover:text-white transition-colors cursor-pointer">Features</button></li>
+                <li><button onClick={() => handleNav('pricing')} className="hover:text-white transition-colors cursor-pointer">Pricing</button></li>
+                <li><Link to="/login" className="hover:text-white transition-colors">Login</Link></li>
+                <li><Link to="/register" className="hover:text-white transition-colors">Signup</Link></li>
               </ul>
             </div>
             <div>
               <h4 className="text-white font-black text-xs uppercase tracking-[0.2em] mb-8">Company</h4>
               <ul className="space-y-4 text-zinc-500 font-bold text-sm">
-                <li><a href="#" className="hover:text-white transition-colors">About Us</a></li>
-                <li><Link to="/support" className="hover:text-white transition-colors">Support</Link></li>
-                <li><a href="#" className="hover:text-white transition-colors">Privacy</a></li>
+                <li><button onClick={() => handleNav('about-us')} className="hover:text-white transition-colors cursor-pointer">About Us</button></li>
+                <li><Link to="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link></li>
+                <li><Link to="/terms" className="hover:text-white transition-colors">Terms of Service</Link></li>
               </ul>
             </div>
           </div>
           <div className="pt-12 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-6">
-            <p className="text-zinc-500 text-sm font-medium">© 2024 PartsFinder Pro. All rights reserved.</p>
+            <p className="text-zinc-500 text-sm font-medium">© 2026 PFPRO. All rights reserved.</p>
             <div className="flex gap-8 text-zinc-500">
               <a href="#" className="hover:text-white transition-colors"><Users size={20} /></a>
               <a href="#" className="hover:text-white transition-colors"><Globe size={20} /></a>

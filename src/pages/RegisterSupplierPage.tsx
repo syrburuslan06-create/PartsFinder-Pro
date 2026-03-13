@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Layers, Mail, Lock, User, ArrowRight, Building2, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Layers, Mail, Lock, User, ArrowRight, Building2, Sparkles, CheckCircle2, PackageSearch } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
-export default function RegisterOwnerPage() {
+export default function RegisterSupplierPage() {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,14 +24,12 @@ export default function RegisterOwnerPage() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/owner/dashboard`
+          redirectTo: `${window.location.origin}/supplier/dashboard`
         }
       });
       if (error) throw error;
       
-      // Note: Role assignment and profile creation would typically happen 
-      // in a callback or via Supabase triggers/functions
-      localStorage.setItem('userRole', 'owner');
+      localStorage.setItem('userRole', 'supplier');
     } catch (error) {
       console.error('Supabase Google login error:', error);
       alert('Failed to initialize Google login. Please ensure Supabase is correctly configured.');
@@ -61,13 +59,12 @@ export default function RegisterOwnerPage() {
         options: {
           data: {
             full_name: formData.name,
-            role: 'owner'
+            role: 'supplier'
           }
         }
       });
 
       if (signUpError) {
-        // If user already exists, try to sign in instead
         if (signUpError.message.includes('User already registered') || signUpError.status === 400) {
           const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
             email: normalizedEmail,
@@ -75,10 +72,9 @@ export default function RegisterOwnerPage() {
           });
           
           if (signInError) {
-            // For testing/demo purposes, if email is not confirmed, we still let them in locally
             if (signInError.message.includes('Email not confirmed')) {
               console.warn("Email not confirmed, but logging in locally for demo purposes.");
-              authUser = { id: 'demo-user-' + Date.now() }; // Mock user ID
+              authUser = { id: 'demo-user-' + Date.now() };
             } else {
               throw signInError;
             }
@@ -87,7 +83,6 @@ export default function RegisterOwnerPage() {
             authSession = signInData.session;
           }
         } else if (signUpError.message.includes('security purposes') || signUpError.status === 429) {
-          // Rate limit hit, just log them in locally for demo purposes
           console.warn("Rate limit hit, logging in locally for demo purposes.");
           authUser = { id: 'demo-user-' + Date.now() };
         } else {
@@ -109,11 +104,10 @@ export default function RegisterOwnerPage() {
         let companyId = existingCompany?.id;
 
         if (!companyId) {
-          // 1. Create Company
           const { data: company, error: companyError } = await supabase
             .from('companies')
             .insert({
-              name: formData.companyName || 'My Company',
+              name: formData.companyName || 'My Supplier Company',
               owner_id: authUser.id,
               seat_limit: 15,
               plan: 'free'
@@ -123,7 +117,6 @@ export default function RegisterOwnerPage() {
 
           if (companyError) {
             console.error("Company creation error:", companyError);
-            // Fallback for demo purposes if RLS blocks insert without session
             companyId = 'demo-company-' + authUser.id;
           } else {
             companyId = company.id;
@@ -138,11 +131,10 @@ export default function RegisterOwnerPage() {
           .maybeSingle();
 
         if (!existingProfile) {
-          // 2. Create Profile
           const { error: profileError } = await supabase.from('profiles').insert({
             id: authUser.id,
-            full_name: formData.name || 'Owner',
-            role: 'owner',
+            full_name: formData.name || 'Supplier',
+            role: 'supplier',
             company_id: companyId
           });
           
@@ -151,17 +143,16 @@ export default function RegisterOwnerPage() {
           }
         }
 
-        localStorage.setItem('userRole', 'owner');
+        localStorage.setItem('userRole', 'supplier');
         localStorage.setItem('userEmail', normalizedEmail);
         localStorage.setItem('currentUser', JSON.stringify({
-          name: formData.name || 'Owner',
+          name: formData.name || 'Supplier',
           email: normalizedEmail,
-          role: 'owner'
+          role: 'supplier'
         }));
         if (companyId) localStorage.setItem('companyId', companyId);
         
-        // Force navigation to dashboard
-        navigate('/owner/dashboard');
+        navigate('/supplier/dashboard');
       }
     } catch (error: any) {
       console.error('Supabase Registration Error:', error);
@@ -199,20 +190,20 @@ export default function RegisterOwnerPage() {
           >
             <div className="inline-flex items-center gap-2 px-6 py-2 rounded-full bg-white/5 shadow-glass border border-white/10 text-white text-[10px] font-black mb-12 tracking-[0.2em] uppercase">
               <Sparkles size={14} className="animate-pulse text-brand-primary" />
-              Enterprise Logistics Core
+              Supplier Network Core
             </div>
             <h1 className="text-7xl xl:text-9xl font-display font-black mb-8 tracking-tighter leading-[0.85] text-white uppercase">
-              DIRECTOR <br />
+              SUPPLIER <br />
               <span className="text-brand-primary italic">PORTAL.</span>
             </h1>
             <p className="text-xl text-zinc-400 mb-12 leading-relaxed font-medium max-w-md">
-              Scale your fleet operations with enterprise-grade procurement tools, team management, and global inventory access.
+              Connect your inventory to thousands of buyers. Manage your catalog, track orders, and grow your business.
             </p>
 
             <div className="space-y-8">
-              <FeatureItem text="Multi-user Team Management Matrix" />
-              <FeatureItem text="Bulk Procurement Neural Network" />
-              <FeatureItem text="Advanced Logistics Intelligence" />
+              <FeatureItem text="Bulk CSV Catalog Upload" />
+              <FeatureItem text="Real-time Inventory Management" />
+              <FeatureItem text="Instant Order Notifications" />
             </div>
           </motion.div>
         </div>
@@ -236,8 +227,8 @@ export default function RegisterOwnerPage() {
           className="w-full max-w-md"
         >
           <div className="mb-8 lg:mb-12">
-            <h2 className="text-4xl lg:text-5xl font-display font-black mb-3 lg:mb-4 text-white tracking-tight">Register Director</h2>
-            <p className="text-zinc-400 font-medium text-base lg:text-lg">Initialize your company's sourcing core.</p>
+            <h2 className="text-4xl lg:text-5xl font-display font-black mb-3 lg:mb-4 text-white tracking-tight">Register Supplier</h2>
+            <p className="text-zinc-400 font-medium text-base lg:text-lg">Initialize your distribution core.</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -267,13 +258,13 @@ export default function RegisterOwnerPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Company Name</label>
+                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Supplier Company Name</label>
                 <div className="relative group">
                   <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-white transition-colors" size={18} />
                   <input
                     type="text"
                     required
-                    placeholder="Fleet Solutions Inc."
+                    placeholder="Global Parts Dist."
                     className="tactile-input w-full py-4 pl-12 pr-4"
                     value={formData.companyName}
                     onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
@@ -288,7 +279,7 @@ export default function RegisterOwnerPage() {
                   <input
                     type="email"
                     required
-                    placeholder="john@example.com"
+                    placeholder="sales@example.com"
                     className="tactile-input w-full py-4 pl-12 pr-4"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -318,7 +309,7 @@ export default function RegisterOwnerPage() {
               className="tactile-btn-light w-full py-5 text-lg group disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <span className="flex items-center justify-center gap-2">
-                {isLoading ? 'Processing...' : 'Create Director Account'}
+                {isLoading ? 'Processing...' : 'Create Supplier Account'}
                 {!isLoading && <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />}
               </span>
             </button>
@@ -349,7 +340,7 @@ export default function RegisterOwnerPage() {
 
           <div className="mt-12 pt-8 border-t border-white/10 text-center">
             <p className="text-zinc-400 font-medium">
-              Not a director?{' '}
+              Not a supplier?{' '}
               <Link to="/register" className="text-white hover:text-brand-primary transition-colors font-black uppercase tracking-widest text-xs">
                 Change Role
               </Link>

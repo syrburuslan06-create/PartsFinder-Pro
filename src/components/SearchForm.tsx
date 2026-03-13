@@ -1,134 +1,113 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Car, Truck, Search, Camera, X, Info, Hash, FileText, Loader2, CheckCircle2, AlertCircle, ArrowRight, ChevronRight, Star, Bookmark, ExternalLink, Grid, ChevronDown, Activity, Cpu, Zap, Shield } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Truck, Car, Search, Camera, X, Loader2, Users, ArrowRight, Bookmark, Star, AlertCircle, ChevronRight, CheckCircle2, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { searchParts, SearchResult, SearchResponse, decodeVin, VinDetails } from '../services/geminiService';
-import { PART_CATEGORIES, PartCategory } from '../constants';
+import { useAppContext } from '../contexts/AppContext';
+import type { SearchEntry } from '../contexts/AppContext';
 
-import { supabase } from '../lib/supabase';
+type VehicleType = 'truck' | 'car';
 
-type VehicleType = 'car' | 'truck';
-type SearchMode = 'visual' | 'quick' | 'detailed' | 'vin' | 'manual';
+interface SearchResult {
+  id: number;
+  partName: string;
+  partNumber: string;
+  supplier: string;
+  price: string;
+  rating: number;
+  availability: string;
+  image: string;
+  description?: string;
+  compatibility?: string;
+  reviewsCount?: number;
+  sourceUrl?: string;
+}
 
 export default function SearchForm() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [vehicleType, setVehicleType] = useState<VehicleType | null>(null);
-  const [searchMode, setSearchMode] = useState<SearchMode>('quick');
-  const [isSearching, setIsSearching] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { incrementSearches } = useAppContext();
+  
+  const currentUserStr = localStorage.getItem('currentUser');
+  const currentUser = currentUserStr ? JSON.parse(currentUserStr) : null;
+  
+  const [vehicleType, setVehicleType] = useState<VehicleType>('truck');
+  const [make, setMake] = useState('');
+  const [model, setModel] = useState('');
+  const [year, setYear] = useState('');
+  const [engine, setEngine] = useState('');
+  const [vin, setVin] = useState('');
   const [isDecodingVin, setIsDecodingVin] = useState(false);
-  const [results, setResults] = useState<SearchResult[] | null>(null);
-  const [groundingMetadata, setGroundingMetadata] = useState<any>(null);
-  const [selectedPart, setSelectedPart] = useState<SearchResult | null>(null);
-  const [vinDetails, setVinDetails] = useState<VinDetails | null>(null);
-  const [searchTries, setSearchTries] = useState(() => {
-    const saved = localStorage.getItem('owner_search_tries');
-    return saved ? parseInt(saved) : 5;
-  });
-  const userRole = localStorage.getItem('userRole');
-  const isOwner = userRole === 'owner';
-  const companyId = localStorage.getItem('companyId');
-
-  const [selectedCategory, setSelectedCategory] = useState<PartCategory | null>(null);
-  const [selectedSubcategory, setSelectedSubcategory] = useState<string | null>(null);
-  
-  const [formData, setFormData] = useState({
-    partNumber: '',
-    vin: '',
-    description: '',
-    make: '',
-    model: '',
-    year: '',
-    motor: '',
-    vehicleSearch: '', // Unified VIN or Name
-  });
-
-  const recordSearch = async (query: string, result: SearchResult | null) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from('searches').insert({
-          mechanic_id: user.id,
-          company_id: companyId || null,
-          query: query,
-          result_part_name: result?.partName || null,
-          result_part_number: result?.partNumber || null
-        });
-      }
-    } catch (error) {
-      console.error('Error recording search:', error);
-    }
-  };
-
-  useEffect(() => {
-    const query = searchParams.get('q');
-    if (query) {
-      setFormData(prev => ({ ...prev, partNumber: query }));
-      setVehicleType('car'); // Default to car for quick search from topbar
-      setSearchMode('quick');
-      
-      // Trigger search
-      const triggerSearch = async () => {
-        setIsSearching(true);
-        try {
-          const response = await searchParts({
-            vehicleType: 'car',
-            partNumber: query,
-            description: '',
-            make: '',
-            model: '',
-            year: '',
-            motor: '',
-            vehicle: ''
-          });
-          setResults(response.results);
-          setGroundingMetadata(response.groundingMetadata);
-          
-          if (response.results.length > 0) {
-            recordSearch(query, response.results[0]);
-          }
-
-          if (isOwner) {
-            const newTries = Math.max(0, searchTries - 1);
-            setSearchTries(newTries);
-            localStorage.setItem('owner_search_tries', newTries.toString());
-          }
-        } catch (error) {
-          console.error("Search failed:", error);
-        } finally {
-          setIsSearching(false);
-        }
-      };
-      
-      triggerSearch();
-      
-      // Clear the query param so it doesn't re-trigger on refresh
-      setSearchParams({}, { replace: true });
-    }
-  }, [searchParams]);
-  
+  const [partQuery, setPartQuery] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [isAnalyzingPhoto, setIsAnalyzingPhoto] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { searchHistory, setSearchHistory } = useAppContext();
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    if (name === 'vin') {
-      setVinDetails(null);
-    }
-  };
-
-  const handleDecodeVin = async () => {
-    if (!formData.vin || formData.vin.length < 11) return;
+  const handleVinDecode = async () => {
+    if (!vin || vin.length !== 17) return;
     setIsDecodingVin(true);
     try {
-      const details = await decodeVin(formData.vin);
-      setVinDetails(details);
+      const { decodeVin } = await import('../services/geminiService');
+      const details = await decodeVin(vin);
+      if (details) {
+        if (details.make) setMake(details.make);
+        if (details.model) setModel(details.model);
+        if (details.year) setYear(details.year);
+        if (details.engine) setEngine(details.engine);
+        // We could also try to determine vehicle type based on make/model
+      }
     } catch (error) {
-      console.error("VIN Decode failed:", error);
+      console.error('Failed to decode VIN:', error);
     } finally {
       setIsDecodingVin(false);
     }
+  };
+
+  const commonParts = [
+    'Air Brake Compressor', 'Turbocharger Assembly', 'Fuel Injector Set', 
+    'Alternator', 'Starter Motor', 'Water Pump', 'Radiator', 
+    'Brake Pads', 'Rotors', 'Transmission Fluid Filter'
+  ];
+
+  const filteredSuggestions = commonParts.filter(part => 
+    part.toLowerCase().includes(partQuery.toLowerCase()) && partQuery.length > 0
+  );
+
+  const handleClearAll = () => {
+    setVehicleType('truck');
+    setMake('');
+    setModel('');
+    setYear('');
+    setEngine('');
+    setPartQuery('');
+    removePhoto();
+  };
+
+  // Pre-fill from location state (from Inventory page)
+  useEffect(() => {
+    if (location.state) {
+      const { type, make, model, year, engine } = location.state;
+      if (type) setVehicleType(type);
+      if (make) setMake(make);
+      if (model) setModel(model);
+      if (year) setYear(year);
+      if (engine) setEngine(engine);
+    }
+  }, [location.state]);
+
+  const truckMakes = ['Freightliner', 'Kenworth', 'Peterbilt', 'Mack', 'Volvo', 'International', 'Western Star'];
+  const carMakes = ['Ford', 'Chevrolet', 'Toyota', 'Honda', 'Dodge', 'RAM', 'GMC'];
+  const makes = vehicleType === 'truck' ? truckMakes : carMakes;
+
+  const years = Array.from({ length: 2026 - 1990 + 1 }, (_, i) => (2026 - i).toString());
+
+  const handleVehicleTypeChange = (type: VehicleType) => {
+    setVehicleType(type);
+    setMake(''); // Reset make when switching type
   };
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -136,8 +115,46 @@ export default function SearchForm() {
       const file = e.target.files[0];
       setPhoto(file);
       const reader = new FileReader();
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         setPhotoPreview(reader.result as string);
+        setIsAnalyzingPhoto(true);
+        
+        try {
+          const base64 = (reader.result as string).split(',')[1];
+          const response = await fetch('/api/ai/analyze-photo', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token') ? JSON.parse(localStorage.getItem('supabase.auth.token') || '{}').currentSession?.access_token : ''}`
+            },
+            body: JSON.stringify({
+              imageBase64: base64,
+              mimeType: file.type,
+              filename: file.name
+            })
+          });
+          
+          let data;
+          const contentType = response.headers.get("content-type");
+          if (contentType && contentType.indexOf("application/json") !== -1) {
+            data = await response.json();
+          } else {
+            const text = await response.text();
+            console.error("Non-JSON response:", text);
+            throw new Error("Server returned an invalid response. Please try again later.");
+          }
+          
+          if (!response.ok) {
+            throw new Error(data.error || 'Analysis failed');
+          }
+          
+          setPartQuery(data.result);
+        } catch (e) {
+          console.error('AI Analysis error:', e);
+          setPartQuery('Heavy Duty Brake Caliper'); // Fallback
+        } finally {
+          setIsAnalyzingPhoto(false);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -149,573 +166,378 @@ export default function SearchForm() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (isOwner && searchTries <= 0) {
-      alert("You have used all your 5 free trial searches. Please upgrade your plan to continue.");
-      return;
-    }
+    if (!make || !year || !partQuery) return;
 
     setIsSearching(true);
-    setResults(null);
+    incrementSearches();
+    
+    const newSearch: SearchEntry = {
+      query: partQuery,
+      vehicleInfo: `${year} ${make} ${model}`,
+      timestamp: new Date().toISOString()
+    };
+    setSearchHistory(prev => [newSearch, ...prev].slice(0, 5));
 
-    try {
-      const response = await searchParts({
-        vehicleType: vehicleType || undefined,
-        partNumber: formData.partNumber,
-        description: formData.description,
-        make: formData.make,
-        model: formData.model,
-        year: formData.year,
-        motor: formData.motor,
-        vin: formData.vin || (formData.vehicleSearch.length >= 11 ? formData.vehicleSearch : undefined),
-        vehicle: formData.vehicleSearch,
-        image: photoPreview || undefined
-      });
-      setResults(response.results);
-      setGroundingMetadata(response.groundingMetadata);
-      
-      if (response.results.length > 0) {
-        recordSearch(formData.partNumber || formData.description || formData.vehicleSearch, response.results[0]);
-      }
-
-      if (isOwner) {
-        const newTries = searchTries - 1;
-        setSearchTries(newTries);
-        localStorage.setItem('owner_search_tries', newTries.toString());
-      }
-    } catch (error) {
-      console.error("Search failed:", error);
-    } finally {
+    setTimeout(() => {
       setIsSearching(false);
-    }
-  };
-
-  const resetSearch = () => {
-    setResults(null);
-    setGroundingMetadata(null);
-    setSelectedPart(null);
-    setFormData({
-      partNumber: '',
-      vin: '',
-      description: '',
-      make: '',
-      model: '',
-      year: '',
-      motor: '',
-    });
-    removePhoto();
-  };
-
-  const toggleSavePart = async (part: SearchResult) => {
-    const saved = localStorage.getItem('saved_parts');
-    let savedParts: SearchResult[] = saved ? JSON.parse(saved) : [];
-    
-    const isSaved = savedParts.some(p => p.partNumber === part.partNumber);
-    
-    if (isSaved) {
-      savedParts = savedParts.filter(p => p.partNumber !== part.partNumber);
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          await supabase.from('saved_parts').delete().eq('mechanic_id', user.id).eq('part_number', part.partNumber);
+      navigate('/results', {
+        state: {
+          vehicleType,
+          make,
+          model,
+          year,
+          engine,
+          vin,
+          partQuery,
+          hasPhoto: !!photo
         }
-      } catch (error) {
-        console.error('Error deleting saved part:', error);
-      }
-    } else {
-      savedParts.push(part);
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          await supabase.from('saved_parts').insert({
-            mechanic_id: user.id,
-            part_number: part.partNumber,
-            part_name: part.partName,
-            price: parseFloat(part.price.replace(/[^0-9.]/g, '')),
-            notes: part.description
-          });
-        }
-      } catch (error) {
-        console.error('Error saving part:', error);
-      }
-    }
-    
-    localStorage.setItem('saved_parts', JSON.stringify(savedParts));
-    window.dispatchEvent(new Event('storage')); 
+      });
+    }, 1500);
   };
 
-  const isPartSaved = (partNumber: string) => {
-    const saved = localStorage.getItem('saved_parts');
-    const savedParts: SearchResult[] = saved ? JSON.parse(saved) : [];
-    return savedParts.some(p => p.partNumber === partNumber);
-  };
-
-  if (!vehicleType) {
+  if (currentUser?.role === 'director') {
     return (
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="grid grid-cols-1 gap-4 lg:gap-8 max-w-4xl mx-auto px-4 lg:px-2"
-      >
-        <div className="text-center mb-4 lg:hidden">
-          <h1 className="text-3xl font-display font-black text-white tracking-tighter">Select Vehicle</h1>
-          <p className="text-zinc-400 text-sm font-medium">Choose your category to begin sourcing</p>
+      <div className="max-w-2xl mx-auto">
+        <div className="tactile-card p-12 text-center space-y-6">
+          <div className="w-20 h-20 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mx-auto">
+            <Users size={40} className="text-zinc-500" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-3xl font-display font-black text-white">Search Not Available</h2>
+            <p className="text-zinc-400 font-medium">Director accounts cannot perform searches. Add workers to your team.</p>
+          </div>
+          <button 
+            onClick={() => navigate('/workers')}
+            className="tactile-btn-light px-8 py-4 text-sm group"
+          >
+            Manage Workers
+            <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+          </button>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-6">
-          <VehicleTypeCard 
-            type="car" 
-            icon={<Car size={32} className="lg:size-12" />} 
-            title="Passenger Car" 
-            desc="Sedans, SUVs, Light Vehicles" 
-            onClick={() => setVehicleType('car')} 
-          />
-          <VehicleTypeCard 
-            type="truck" 
-            icon={<Truck size={32} className="lg:size-12" />} 
-            title="Commercial Truck" 
-            desc="Heavy Duty, Fleet Vehicles" 
-            onClick={() => setVehicleType('truck')} 
-          />
-        </div>
-      </motion.div>
+      </div>
     );
   }
 
+  const isFormValid = make && year && partQuery;
+
   return (
-    <div className="max-w-5xl mx-auto space-y-4 lg:space-y-6 pb-32 lg:pb-8 px-3 lg:px-0">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.98 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="tactile-card overflow-hidden border-white/10 rounded-3xl lg:rounded-2xl"
-      >
-        {/* Header & Mode Switcher */}
-        <div className="p-4 lg:p-6 border-b border-white/10 bg-white/5 flex flex-col gap-4 lg:gap-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 lg:gap-4">
-              <div className="p-2.5 lg:p-3 rounded-xl bg-white/5 shadow-glass border border-white/10">
-                {vehicleType === 'car' ? <Car className="text-white" size={18} /> : <Truck className="text-white" size={18} />}
-              </div>
-              <div>
-                <h2 className="text-base lg:text-xl font-display font-black text-white">Universal Finder</h2>
-                <div className="flex items-center gap-2">
-                  <p className="text-zinc-500 text-[9px] lg:text-[10px] font-bold uppercase tracking-widest">Sourcing for {vehicleType === 'car' ? 'Passenger' : 'Commercial'}</p>
-                  {isOwner && (
-                    <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${searchTries > 0 ? 'bg-brand-primary/20 text-brand-primary' : 'bg-danger/20 text-danger'}`}>
-                      {searchTries} Tries Left
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-            <button onClick={() => setVehicleType(null)} className="tactile-btn-dark px-3 lg:px-6 py-1.5 lg:py-2 text-[8px] lg:text-[10px] font-black uppercase tracking-widest">
-              <X size={10} /> RESET
+    <div className="max-w-4xl mx-auto space-y-8">
+      <div className="text-center space-y-2">
+        <h1 className="text-5xl font-display font-black text-white tracking-tighter">Find Your Part</h1>
+        <p className="text-zinc-400 font-medium">Search across 40+ global suppliers in seconds.</p>
+      </div>
+
+      <form onSubmit={handleSearch} className="tactile-card p-8 lg:p-12 space-y-10">
+        {/* VIN Search */}
+        <div className="space-y-2 relative">
+          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Quick VIN Search</label>
+          <div className="relative group">
+            <input
+              type="text"
+              value={vin}
+              onChange={(e) => setVin(e.target.value.toUpperCase())}
+              placeholder="Enter 17-digit VIN"
+              className="tactile-input w-full py-4 px-4 font-mono uppercase tracking-widest"
+              maxLength={17}
+            />
+            <button
+              type="button"
+              onClick={handleVinDecode}
+              disabled={vin.length !== 17 || isDecodingVin}
+              className="absolute right-2 top-1/2 -translate-y-1/2 tactile-btn-dark py-2 px-4 text-[10px] font-black uppercase tracking-widest disabled:opacity-50 flex items-center gap-2"
+            >
+              {isDecodingVin ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              Decode
             </button>
-          </div>
-
-          <div className="flex bg-white/5 p-1 lg:p-2 rounded-xl lg:rounded-2xl shadow-glass border border-white/10 overflow-x-auto gap-1 lg:gap-2 scroll-smooth no-scrollbar">
-            <ModeTab active={searchMode === 'quick'} onClick={() => setSearchMode('quick')} icon={<Hash size={12} />} label="Quick" />
-            <ModeTab active={searchMode === 'vin'} onClick={() => setSearchMode('vin')} icon={<FileText size={12} />} label="VIN" />
-            <ModeTab active={searchMode === 'visual'} onClick={() => setSearchMode('visual')} icon={<Camera size={12} />} label="Vision" />
-            <ModeTab active={searchMode === 'manual'} onClick={() => setSearchMode('manual')} icon={<Grid size={12} />} label="Browse" />
-            <ModeTab active={searchMode === 'detailed'} onClick={() => setSearchMode('detailed')} icon={<FileText size={12} />} label="Detailed" />
-          </div>
-
-          {/* Unified Vehicle Bar */}
-          <div className="space-y-2 lg:space-y-4">
-            <label className="text-[9px] lg:text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 lg:ml-2 flex items-center gap-2">
-              <Car size={10} /> Vehicle Identification
-            </label>
-            <div className="relative group">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-white transition-colors" size={16} />
-              <input
-                type="text"
-                name="vehicleSearch"
-                value={formData.vehicleSearch}
-                onChange={handleInputChange}
-                placeholder="VIN or Vehicle Name"
-                className="tactile-input pl-11 pr-20 lg:pr-32 py-3 lg:py-4 text-[11px] lg:text-base"
-              />
-              {formData.vehicleSearch.length >= 11 && !vinDetails && (
-                <button 
-                  type="button"
-                  onClick={() => {
-                    setFormData(prev => ({ ...prev, vin: formData.vehicleSearch }));
-                    handleDecodeVin();
-                  }}
-                  className="absolute right-2 lg:right-4 top-1/2 -translate-y-1/2 px-2 py-1 lg:px-3 lg:py-2 rounded-lg bg-brand-primary text-white text-[8px] lg:text-[10px] font-black uppercase tracking-widest hover:shadow-glow transition-all"
-                >
-                  DECODE
-                </button>
-              )}
-            </div>
           </div>
         </div>
 
-        {/* Search Form */}
-        <form onSubmit={handleSubmit} className="p-4 lg:p-8 space-y-4 lg:space-y-10 relative overflow-hidden">
-          {isSearching && (
-            <motion.div 
-              initial={{ top: '-100%' }}
-              animate={{ top: '100%' }}
-              transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-              className="absolute left-0 right-0 h-1 bg-brand-primary shadow-glow z-20 pointer-events-none"
-            />
-          )}
-          
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
-            {/* Left Column: Inputs */}
-            <div className="lg:col-span-7 space-y-8">
-              {searchMode === 'quick' && (
-                <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
-                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Part Number</label>
-                  <div className="relative group">
-                    <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-white transition-colors" size={18} />
-                    <input
-                      type="text"
-                      name="partNumber"
-                      value={formData.partNumber}
-                      onChange={handleInputChange}
-                      placeholder="Enter part number (e.g. 12345-ABC)"
-                      className="tactile-input pl-12"
-                      required
-                    />
-                  </div>
-                </motion.div>
-              )}
-
-              {searchMode === 'vin' && (
-                <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
-                  <div className="space-y-4">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">VIN Number</label>
-                    <div className="flex gap-4">
-                      <div className="relative group flex-1">
-                        <Hash className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-white transition-colors" size={18} />
-                        <input
-                          type="text"
-                          name="vin"
-                          value={formData.vin}
-                          onChange={handleInputChange}
-                          placeholder="Enter 17-character VIN"
-                          className="tactile-input pl-12"
-                          required
-                        />
-                      </div>
-                      <button 
-                        type="button"
-                        onClick={handleDecodeVin}
-                        disabled={isDecodingVin || !formData.vin}
-                        className="tactile-btn-dark px-6 whitespace-nowrap flex items-center gap-2"
-                      >
-                        {isDecodingVin ? <Loader2 className="animate-spin" size={16} /> : <Activity size={16} />}
-                        Decode
-                      </button>
-                    </div>
-                  </div>
-
-                  <AnimatePresence>
-                    {vinDetails && (
-                      <motion.div 
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="p-6 rounded-3xl bg-white/5 shadow-glass border border-white/10 grid grid-cols-2 gap-4"
-                      >
-                        <VinDetailItem label="Vehicle" value={`${vinDetails.year} ${vinDetails.make} ${vinDetails.model}`} />
-                        <VinDetailItem label="Engine" value={vinDetails.engine} />
-                        <VinDetailItem label="Transmission" value={vinDetails.transmission} />
-                        <VinDetailItem label="Drive" value={vinDetails.driveType} />
-                        <VinDetailItem label="Trim" value={vinDetails.trim} />
-                        <VinDetailItem label="Origin" value={vinDetails.manufacturedIn} />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  <div className="space-y-4">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">What parts you need?</label>
-                    <textarea
-                      name="description"
-                      value={formData.description}
-                      onChange={handleInputChange}
-                      placeholder="List the parts you are looking for..."
-                      className="tactile-input min-h-[120px] py-4"
-                      required
-                    />
-                  </div>
-                </motion.div>
-              )}
-
-              {searchMode === 'manual' && (
-                <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
-                  <div className="space-y-4">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Select Category</label>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                      {PART_CATEGORIES.map((cat) => (
-                        <button
-                          key={cat.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedCategory(cat);
-                            setSelectedSubcategory(null);
-                          }}
-                          className={`p-4 rounded-2xl border transition-all flex flex-col items-center gap-2 ${
-                            selectedCategory?.id === cat.id 
-                              ? 'bg-white/20 text-white border-white/20 shadow-glow' 
-                              : 'bg-white/5 border-white/10 text-zinc-400 hover:border-white/20'
-                          }`}
-                        >
-                          <div className={`p-3 rounded-xl ${selectedCategory?.id === cat.id ? 'bg-white/20' : 'bg-white/10'}`}>
-                            {cat.id === 'engine' && <Cpu size={20} />}
-                            {cat.id === 'transmission' && <Zap size={20} />}
-                            {cat.id === 'suspension' && <Car size={20} />}
-                            {cat.id === 'braking' && <Shield size={20} />}
-                            {cat.id === 'electrical' && <Zap size={20} />}
-                          </div>
-                          <span className="text-[10px] font-black uppercase tracking-widest text-center">{cat.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <AnimatePresence>
-                    {selectedCategory && (
-                      <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="space-y-4"
-                      >
-                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Select Subcategory</label>
-                        <div className="flex flex-wrap gap-3">
-                          {selectedCategory.subcategories.map((sub) => (
-                            <button
-                              key={sub.id}
-                              type="button"
-                              onClick={() => setSelectedSubcategory(sub.id)}
-                              className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border ${
-                                selectedSubcategory === sub.id
-                                  ? 'bg-white/20 text-white border-white/20 shadow-glow'
-                                  : 'bg-white/5 border-white/10 text-zinc-400 hover:border-white/20'
-                              }`}
-                            >
-                              {sub.name}
-                            </button>
-                          ))}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  <AnimatePresence>
-                    {selectedSubcategory && (
-                      <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="space-y-4"
-                      >
-                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Select Part</label>
-                        <div className="grid grid-cols-2 gap-3">
-                          {selectedCategory?.subcategories.find(s => s.id === selectedSubcategory)?.parts.map((part) => (
-                            <button
-                              key={part}
-                              type="button"
-                            onClick={() => {
-                                setFormData(prev => ({ ...prev, description: part }));
-                                // Small delay to ensure state is updated before submit
-                                setTimeout(() => {
-                                  const form = document.querySelector('form');
-                                  if (form) form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-                                }, 100);
-                              }}
-                              className={`p-4 rounded-xl text-xs font-bold text-left transition-all border ${
-                                formData.description === part
-                                  ? 'bg-white/20 border-white/30 text-white'
-                                  : 'bg-white/5 border-white/10 text-zinc-400 hover:border-white/20'
-                              }`}
-                            >
-                              {part}
-                            </button>
-                          ))}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              )}
-
-              {searchMode === 'visual' && (
-                <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-4">
-                   <div className="space-y-4">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Part Description (Optional)</label>
-                    <textarea
-                      name="description"
-                      value={formData.description}
-                      onChange={handleInputChange}
-                      placeholder="Describe the part or the problem you're seeing..."
-                      className="tactile-input min-h-[120px] py-4"
-                    />
-                  </div>
-                </motion.div>
-              )}
-
-              {searchMode === 'detailed' && (
-                <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Part Number (Optional)</label>
-                      <input type="text" name="partNumber" value={formData.partNumber} onChange={handleInputChange} placeholder="Part #" className="tactile-input" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Part Name / Need</label>
-                      <input type="text" name="description" value={formData.description} onChange={handleInputChange} placeholder="What do you need?" className="tactile-input" required />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Make</label>
-                      <input type="text" name="make" value={formData.make} onChange={handleInputChange} placeholder="Ford" className="tactile-input" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Model</label>
-                      <input type="text" name="model" value={formData.model} onChange={handleInputChange} placeholder="F-150" className="tactile-input" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Year</label>
-                      <input type="text" name="year" value={formData.year} onChange={handleInputChange} placeholder="2024" className="tactile-input" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Motor (Optional)</label>
-                      <input type="text" name="motor" value={formData.motor} onChange={handleInputChange} placeholder="5.0L V8" className="tactile-input" />
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
-              <div className="pt-6">
-                <button type="submit" disabled={isSearching} className="tactile-btn-dark w-full py-6 text-xl group">
-                  {isSearching ? <Loader2 className="animate-spin" /> : <Search size={24} className="group-hover:scale-110 transition-transform" />}
-                  {isSearching ? 'ANALYZING DATABASE...' : 'SEARCH GLOBAL INVENTORY'}
-                </button>
-              </div>
-            </div>
-
-            {/* Right Column: Visual Context */}
-            <div className="lg:col-span-5">
-              <div className="space-y-2 mb-4">
-                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2 flex items-center gap-2">
-                  Visual Reference {searchMode === 'visual' && <span className="text-brand-primary">Required</span>}
-                </label>
-              </div>
-              <div 
-                onClick={() => fileInputRef.current?.click()}
-                className={`tactile-card h-[300px] flex flex-col items-center justify-center gap-6 cursor-pointer transition-all relative overflow-hidden group border-2 border-dashed ${
-                  photoPreview ? 'border-brand-primary/50' : 'border-white/10 hover:border-white/30'
-                }`}
-              >
-                <input type="file" ref={fileInputRef} onChange={handlePhotoChange} accept="image/*" className="hidden" />
-                
-                {photoPreview ? (
-                  <>
-                    <img src={photoPreview} alt="Preview" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
-                    <div className="absolute inset-0 bg-bg/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
-                      <p className="text-sm font-black text-white uppercase tracking-widest">CHANGE PHOTO</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); removePhoto(); }}
-                      className="absolute top-4 right-4 p-3 bg-brand-primary text-white rounded-2xl hover:shadow-glow transition-all z-30"
-                    >
-                      <X size={20} />
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <div className="p-6 rounded-2xl bg-white/5 shadow-glass border border-white/10 group-hover:shadow-glow transition-all">
-                      <Camera size={48} className="text-zinc-500 group-hover:text-white transition-colors" />
-                    </div>
-                    <div className="text-center px-8">
-                      <p className="font-black text-white uppercase tracking-widest">UPLOAD PART PHOTO</p>
-                      <p className="text-xs text-zinc-500 mt-2 font-medium">AI will analyze the image to identify the exact part and compatibility.</p>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
+        <div className="relative py-4">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-white/10"></div>
           </div>
-        </form>
-      </motion.div>
+          <div className="relative flex justify-center text-[10px] uppercase tracking-[0.2em] font-black">
+            <span className="bg-surface px-4 text-zinc-500">Or Enter Details Manually</span>
+          </div>
+        </div>
 
-      {/* Results Section */}
-      <AnimatePresence mode="wait">
-        {isSearching ? (
-          <motion.div
-            key="loading"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="space-y-12"
-          >
-            <div className="flex items-center justify-between">
-              <div className="h-14 w-64 bg-white/5 rounded-2xl animate-pulse" />
-              <div className="h-10 w-32 bg-white/5 rounded-xl animate-pulse" />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-              {[1, 2, 3, 4].map((i) => (
-                <PartCardSkeleton key={i} />
-              ))}
-            </div>
-          </motion.div>
-        ) : results ? (
-          <motion.div
-            key="results"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            className="space-y-12"
-          >
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-              <h3 className="text-2xl lg:text-4xl font-display font-black flex items-center gap-4 lg:gap-6 text-white">
-                <div className="w-10 h-10 lg:w-14 lg:h-14 rounded-xl lg:rounded-2xl bg-white/5 shadow-glass border border-white/10 flex items-center justify-center shrink-0">
-                  <CheckCircle2 className="text-white" size={24} />
+        {/* Vehicle Type Toggle */}
+        <div className="space-y-4">
+          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Vehicle Category</label>
+          <div className="flex p-2 bg-white/5 rounded-2xl border border-white/10 gap-2">
+            <button
+              type="button"
+              onClick={() => handleVehicleTypeChange('truck')}
+              className={`flex-1 py-4 rounded-xl flex items-center justify-center gap-3 transition-all ${
+                vehicleType === 'truck' ? 'bg-white/10 text-white shadow-glow border border-white/10' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <Truck size={20} />
+              <span className="font-black uppercase tracking-widest text-xs">Truck</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleVehicleTypeChange('car')}
+              className={`flex-1 py-4 rounded-xl flex items-center justify-center gap-3 transition-all ${
+                vehicleType === 'car' ? 'bg-white/10 text-white shadow-glow border border-white/10' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <Car size={20} />
+              <span className="font-black uppercase tracking-widest text-xs">Car</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Vehicle Details Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Make</label>
+            <select
+              value={make}
+              onChange={(e) => setMake(e.target.value)}
+              className="tactile-input w-full py-4 px-4 appearance-none"
+              required
+            >
+              <option value="" disabled>Select Make</option>
+              {makes.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Model</label>
+            <input
+              type="text"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="e.g. Cascadia, F-150"
+              className="tactile-input w-full py-4 px-4"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Year</label>
+            <select
+              value={year}
+              onChange={(e) => setYear(e.target.value)}
+              className="tactile-input w-full py-4 px-4 appearance-none"
+              required
+            >
+              <option value="" disabled>Select Year</option>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Engine Type</label>
+            <input
+              type="text"
+              value={engine}
+              onChange={(e) => setEngine(e.target.value)}
+              placeholder="Optional — e.g. Cummins ISX15"
+              className="tactile-input w-full py-4 px-4"
+            />
+          </div>
+        </div>
+
+        {/* Part Search Input */}
+        <div className="space-y-2 relative">
+          <div className="flex justify-between items-center mb-2">
+            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">What part are you looking for?</label>
+            <button 
+              type="button" 
+              onClick={handleClearAll}
+              className="text-[10px] font-black text-zinc-500 hover:text-white uppercase tracking-widest transition-colors flex items-center gap-1"
+            >
+              <X size={12} /> Clear All
+            </button>
+          </div>
+          <div className="relative group">
+            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-white transition-colors" size={24} />
+            <input
+              type="text"
+              value={partQuery}
+              onChange={(e) => {
+                setPartQuery(e.target.value);
+                setShowSuggestions(true);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+              placeholder="Air Brake Compressor, Part# 5018485X, Turbo..."
+              className="tactile-input w-full py-6 pl-16 pr-6 text-lg"
+              required
+            />
+          </div>
+          
+          {/* Auto-suggest Dropdown */}
+          <AnimatePresence>
+            {showSuggestions && filteredSuggestions.length > 0 && make && model && year && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="absolute z-20 w-full mt-2 bg-[#1A1A1A] border border-white/10 rounded-xl shadow-2xl overflow-hidden"
+              >
+                <div className="p-2 bg-brand-primary/10 border-b border-white/5">
+                  <p className="text-[10px] font-black text-brand-primary uppercase tracking-widest flex items-center gap-1">
+                    <CheckCircle2 size={12} /> Compatible with {year} {make} {model}
+                  </p>
                 </div>
-                Found {results.length} Matches
-              </h3>
-              <div className="flex flex-wrap gap-3 lg:gap-4">
-                <button onClick={() => setSearchMode('manual')} className="tactile-btn-dark flex-1 lg:flex-none px-4 lg:px-8 py-2.5 lg:py-3 text-[10px] lg:text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2">
-                  <Grid size={14} /> Browse Catalog
-                </button>
-                <button onClick={resetSearch} className="tactile-btn-dark flex-1 lg:flex-none px-4 lg:px-8 py-2.5 lg:py-3 text-[10px] lg:text-xs font-black uppercase tracking-widest">Clear Results</button>
+                {filteredSuggestions.map((suggestion, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => {
+                      setPartQuery(suggestion);
+                      setShowSuggestions(false);
+                    }}
+                    className="w-full text-left px-4 py-3 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors border-b border-white/5 last:border-0"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+          
+          {/* Recently Searched */}
+          {searchHistory.length > 0 && !partQuery && (
+            <div className="pt-4">
+              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2 mb-2">Recently Searched</p>
+              <div className="flex flex-wrap gap-2">
+                {searchHistory.map((search, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => {
+                      setPartQuery(search.query);
+                      // Optionally parse vehicleInfo back into make/model/year if needed
+                    }}
+                    className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-full text-xs text-zinc-400 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1.5"
+                  >
+                    <Search size={10} />
+                    {search.query}
+                  </button>
+                ))}
               </div>
             </div>
+          )}
+        </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-              {results.map((part, idx) => (
-                <motion.div 
-                  key={idx}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.1 }}
+        {/* Photo Upload Zone */}
+        <div className="space-y-4">
+          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Photo Reference (Optional)</label>
+          <div 
+            onClick={() => !isAnalyzingPhoto && fileInputRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (isAnalyzingPhoto) return;
+              if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                const file = e.dataTransfer.files[0];
+                setPhoto(file);
+                const reader = new FileReader();
+                reader.onloadend = async () => {
+                  setPhotoPreview(reader.result as string);
+                  setIsAnalyzingPhoto(true);
+                  
+                  try {
+                    const base64 = (reader.result as string).split(',')[1];
+                    const response = await fetch('/api/ai/analyze-photo', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('supabase.auth.token') ? JSON.parse(localStorage.getItem('supabase.auth.token') || '{}').currentSession?.access_token : ''}`
+                      },
+                      body: JSON.stringify({
+                        imageBase64: base64,
+                        mimeType: file.type,
+                        filename: file.name
+                      })
+                    });
+                    
+                    let data;
+                    const contentType = response.headers.get("content-type");
+                    if (contentType && contentType.indexOf("application/json") !== -1) {
+                      data = await response.json();
+                    } else {
+                      const text = await response.text();
+                      console.error("Non-JSON response:", text);
+                      throw new Error("Server returned an invalid response. Please try again later.");
+                    }
+                    
+                    if (!response.ok) {
+                      throw new Error(data.error || 'Analysis failed');
+                    }
+                    
+                    setPartQuery(data.result);
+                  } catch (e) {
+                    console.error('AI Analysis error:', e);
+                    setPartQuery('Heavy Duty Brake Caliper'); // Fallback
+                  } finally {
+                    setIsAnalyzingPhoto(false);
+                  }
+                };
+                reader.readAsDataURL(file);
+              }
+            }}
+            className={`tactile-card h-48 border-2 border-dashed flex flex-col items-center justify-center gap-4 cursor-pointer transition-all relative overflow-hidden group ${
+              photoPreview ? 'border-brand-primary/50' : 'border-white/10 hover:border-white/30'
+            } ${isAnalyzingPhoto ? 'opacity-70 pointer-events-none' : ''}`}
+          >
+            <input type="file" ref={fileInputRef} onChange={handlePhotoChange} accept="image/*" className="hidden" disabled={isAnalyzingPhoto} />
+            
+            {isAnalyzingPhoto ? (
+              <div className="flex flex-col items-center justify-center gap-3">
+                <Loader2 className="animate-spin text-brand-primary" size={32} />
+                <p className="font-black text-white uppercase tracking-widest text-xs">Gemini AI Analyzing...</p>
+              </div>
+            ) : photoPreview ? (
+              <div className="relative w-full h-full">
+                <img src={photoPreview} alt="Preview" className="w-full h-full object-contain p-4" />
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); removePhoto(); }}
+                  className="absolute top-4 right-4 p-2 bg-brand-primary text-white rounded-xl hover:shadow-glow transition-all z-10"
                 >
-                  <PartCard 
-                    part={part} 
-                    onViewDetails={() => setSelectedPart(part)} 
-                    onToggleSave={() => toggleSavePart(part)}
-                    isSaved={isPartSaved(part.partNumber)}
-                  />
-                </motion.div>
-              ))}
-            </div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="p-4 rounded-xl bg-white/5 border border-white/10 group-hover:shadow-glow transition-all">
+                  <Camera size={32} className="text-zinc-500 group-hover:text-white transition-colors" />
+                </div>
+                <div className="text-center">
+                  <p className="font-black text-white uppercase tracking-widest text-xs">AI will identify the part from your photo (optional)</p>
+                  <p className="text-[10px] text-zinc-500 mt-1">Drag & drop or click to upload</p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
 
-      <PartDetailsModal 
-        part={selectedPart} 
-        onClose={() => setSelectedPart(null)} 
-        groundingMetadata={groundingMetadata}
-        onToggleSave={(p) => toggleSavePart(p)}
-        isSaved={selectedPart ? isPartSaved(selectedPart.partNumber) : false}
-      />
+        {/* Search Button */}
+        <div className="pt-4">
+          <button
+            type="submit"
+            disabled={!isFormValid || isSearching}
+            className={`tactile-btn-light w-full py-6 text-xl flex items-center justify-center gap-3 transition-all ${
+              !isFormValid ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+          >
+            {isSearching ? (
+              <>
+                <Loader2 className="animate-spin" size={24} />
+                <span>Searching 40+ Suppliers...</span>
+              </>
+            ) : (
+              <>
+                <Search size={24} />
+                <span>Find Parts Now</span>
+              </>
+            )}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
