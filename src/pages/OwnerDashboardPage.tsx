@@ -34,6 +34,15 @@ export default function OwnerDashboardPage() {
   const [selectedWorker, setSelectedWorker] = useState<WorkerActivity | null>(null);
   const [copied, setCopied] = useState(false);
   const [ownerName, setOwnerName] = useState('Fleet Manager');
+  const [stats, setStats] = useState({
+    workersOnline: 0,
+    totalWorkers: 0,
+    partsSourcedToday: 0,
+    fleetEfficiency: 94,
+    totalSavedParts: 0,
+    totalInventory: 0,
+    totalSearches: 0
+  });
   const [searchTries] = useState(() => {
     const saved = localStorage.getItem('owner_search_tries');
     return saved ? parseInt(saved) : 5;
@@ -61,16 +70,17 @@ export default function OwnerDashboardPage() {
           }
         }
 
-        // 1. Fetch mechanics (profiles)
+        // 1. Fetch workers (profiles)
         const { data: profiles, error: profilesError } = await supabase
           .from('profiles')
           .select('*')
-          .eq('company_id', companyId)
-          .eq('role', 'mechanic');
+          .eq('company_id', companyId);
 
         if (profilesError) throw profilesError;
 
-        // 2. Fetch searches for these mechanics
+        const workerProfiles = profiles.filter(p => p.role === 'worker');
+
+        // 2. Fetch searches for the company
         const { data: searches, error: searchesError } = await supabase
           .from('searches')
           .select('*')
@@ -79,25 +89,62 @@ export default function OwnerDashboardPage() {
 
         if (searchesError) throw searchesError;
 
+        // 3. Fetch saved parts for the company
+        // Since saved_parts is linked to mechanic_id, we fetch for all workers
+        const workerIds = profiles.map(p => p.id);
+        const { count: savedPartsCount } = await supabase
+          .from('saved_parts')
+          .select('*', { count: 'exact', head: true })
+          .in('mechanic_id', workerIds);
+
+        // 4. Fetch inventory for the company
+        const { count: inventoryCount } = await supabase
+          .from('inventory')
+          .select('*', { count: 'exact', head: true })
+          .in('user_id', workerIds);
+
+        // Calculate stats
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const searchesToday = searches.filter(s => new Date(s.created_at) >= today).length;
+        
+        // Mock "online" status based on recent activity (last 30 mins)
+        const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000);
+        const onlineWorkerIds = new Set(
+          searches
+            .filter(s => new Date(s.created_at) >= thirtyMinsAgo)
+            .map(s => s.worker_id)
+        );
+
+        setStats({
+          workersOnline: onlineWorkerIds.size,
+          totalWorkers: workerProfiles.length,
+          partsSourcedToday: searchesToday,
+          fleetEfficiency: workerProfiles.length > 0 ? Math.min(98, 85 + (searchesToday / (workerProfiles.length || 1)) * 2) : 0,
+          totalSavedParts: savedPartsCount || 0,
+          totalInventory: inventoryCount || 0,
+          totalSearches: searches.length
+        });
+
         // Map to WorkerActivity format
-        const activityMap: WorkerActivity[] = profiles.map(profile => {
-          const profileSearches = searches.filter(s => s.mechanic_id === profile.id);
+        const activityMap: WorkerActivity[] = workerProfiles.map(profile => {
+          const profileSearches = searches.filter(s => s.worker_id === profile.id);
           const latestSearch = profileSearches[0];
 
           return {
             id: profile.id,
             workerName: profile.full_name,
             initial: profile.full_name.split(' ').map((n: string) => n[0]).join(''),
-            action: latestSearch ? 'PART SEARCH' : 'IDLE',
+            action: latestSearch && new Date(latestSearch.created_at) >= thirtyMinsAgo ? 'ACTIVE' : 'IDLE',
             partSearched: latestSearch ? latestSearch.result_part_name || latestSearch.query : 'None',
             timestamp: latestSearch ? new Date(latestSearch.created_at).toLocaleString() : 'N/A',
-            location: 'Active Hub', // Mock location as it's not in the searches table yet
+            location: 'Field Unit',
             hoursWorked: 'N/A',
-            history: profileSearches.map(s => ({
+            history: profileSearches.slice(0, 10).map(s => ({
               part: s.result_part_name || s.query,
               time: new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              vehicle: 'Unit #', // Mock
-              status: s.result_part_number ? 'Found' : 'Searching'
+              vehicle: s.search_type || 'Unit #',
+              status: s.result_part_number ? 'Verified' : 'Searching'
             }))
           };
         });
@@ -139,8 +186,8 @@ export default function OwnerDashboardPage() {
                 <Users className="text-brand-primary" size={20} />
               </div>
               <div>
-                <p className="text-[9px] font-black text-brand-primary uppercase tracking-widest">Mechanics Online</p>
-                <p className="text-base font-black text-white">12 Active Now</p>
+                <p className="text-[9px] font-black text-brand-primary uppercase tracking-widest">Workers Online</p>
+                <p className="text-base font-black text-white">{stats.workersOnline} Active Now</p>
               </div>
             </div>
 
@@ -150,7 +197,7 @@ export default function OwnerDashboardPage() {
               </div>
               <div>
                 <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Fleet Efficiency</p>
-                <p className="text-base font-black text-white">94.2% Optimal</p>
+                <p className="text-base font-black text-white">{stats.fleetEfficiency.toFixed(1)}% Optimal</p>
               </div>
             </div>
           </div>
@@ -165,9 +212,53 @@ export default function OwnerDashboardPage() {
                 Fleet Overview
               </h3>
               <div className="space-y-6">
-                <StatRow label="Mechanics Online" value="12 / 15 Active" progress={80} />
-                <StatRow label="Parts Sourced Today" value="48 Units" progress={65} />
-                <StatRow label="Fleet Efficiency" value="94%" progress={94} />
+                <StatRow label="Workers Online" value={`${stats.workersOnline} / ${stats.totalWorkers} Active`} progress={(stats.workersOnline / (stats.totalWorkers || 1)) * 100} />
+                <StatRow label="Parts Sourced Today" value={`${stats.partsSourcedToday} Units`} progress={Math.min(100, (stats.partsSourcedToday / 50) * 100)} />
+                <StatRow label="Fleet Efficiency" value={`${stats.fleetEfficiency.toFixed(0)}%`} progress={stats.fleetEfficiency} />
+              </div>
+            </div>
+
+            <div className="tactile-card p-6 border-white/10 bg-white/5">
+              <h3 className="text-lg font-display font-black text-white mb-6 flex items-center gap-3">
+                <Shield size={18} className="text-brand-primary" />
+                Asset Summary
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+                  <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Saved Parts</p>
+                  <p className="text-xl font-black text-white">{stats.totalSavedParts}</p>
+                </div>
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10">
+                  <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Inventory</p>
+                  <p className="text-xl font-black text-white">{stats.totalInventory}</p>
+                </div>
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10 col-span-2">
+                  <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Total Searches</p>
+                  <p className="text-xl font-black text-white">{stats.totalSearches}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="tactile-card p-6 border-white/10">
+              <h3 className="text-lg font-display font-black text-white mb-4 flex items-center gap-3">
+                <History size={18} className="text-brand-primary" />
+                Recent Fleet Searches
+              </h3>
+              <div className="space-y-3">
+                {workers.flatMap(w => w.history).slice(0, 5).map((search, idx) => (
+                  <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-black text-white truncate max-w-[150px]">{search.part}</span>
+                      <span className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">{search.vehicle}</span>
+                    </div>
+                    <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-widest">
+                      {search.time}
+                    </span>
+                  </div>
+                ))}
+                {workers.length === 0 && (
+                  <p className="text-center py-4 text-zinc-500 text-[10px] font-bold uppercase tracking-widest">No recent searches</p>
+                )}
               </div>
             </div>
 
@@ -208,7 +299,7 @@ export default function OwnerDashboardPage() {
                 </Link>
               </div>
               <p className="text-zinc-400 text-xs font-medium mb-6 leading-relaxed">
-                Share this unique link with your mechanics. They will be automatically linked to your fleet upon registration.
+                Share this unique link with your workers. They will be automatically linked to your fleet upon registration.
               </p>
               <div className="relative group">
                 <input 

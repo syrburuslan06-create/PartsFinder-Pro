@@ -7,6 +7,7 @@ import {
   Menu, ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useAppContext } from '../contexts/AppContext';
 
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -61,6 +62,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     localStorage.removeItem('isGuest');
     window.location.href = '/login';
   };
+
+  const { alerts, markAlertAsRead } = useAppContext();
+  const unreadCount = alerts.filter(a => !a.is_read).length;
+  const [showAlerts, setShowAlerts] = useState(false);
 
   return (
     <div className="flex h-screen h-[100dvh] bg-bg text-ink overflow-hidden font-sans">
@@ -148,10 +153,67 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               System Online
             </div>
             
-            <button className="relative w-10 h-10 rounded-full hover:bg-white/5 flex items-center justify-center text-zinc-400 hover:text-white transition-colors">
-              <Bell size={20} />
-              <span className="absolute top-2.5 right-2.5 w-1.5 h-1.5 bg-brand-secondary rounded-full shadow-glow-red" />
-            </button>
+            <div className="relative">
+              <button 
+                onClick={() => setShowAlerts(!showAlerts)}
+                className="relative w-10 h-10 rounded-full hover:bg-white/5 flex items-center justify-center text-zinc-400 hover:text-white transition-colors"
+              >
+                <Bell size={20} />
+                {unreadCount > 0 && (
+                  <span className="absolute top-2 right-2 w-4 h-4 bg-brand-secondary rounded-full shadow-glow-red flex items-center justify-center text-[8px] font-black text-white">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+
+              <AnimatePresence>
+                {showAlerts && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute right-0 mt-2 w-80 bg-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[100]"
+                  >
+                    <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/5">
+                      <h3 className="text-xs font-black uppercase tracking-widest text-white">Alerts</h3>
+                      <Link to="/alerts" onClick={() => setShowAlerts(false)} className="text-[10px] text-brand-primary hover:underline font-bold uppercase">View All</Link>
+                    </div>
+                    <div className="max-h-96 overflow-y-auto">
+                      {alerts.length === 0 ? (
+                        <div className="p-8 text-center text-zinc-500 text-xs font-medium">No alerts found</div>
+                      ) : (
+                        alerts.slice(0, 5).map(alert => (
+                          <div 
+                            key={alert.id} 
+                            className={`p-4 border-b border-white/5 hover:bg-white/5 transition-colors cursor-pointer ${!alert.is_read ? 'bg-brand-primary/5' : ''}`}
+                            onClick={() => {
+                              if (!alert.is_read) markAlertAsRead(alert.id);
+                              setShowAlerts(false);
+                              navigate('/alerts');
+                            }}
+                          >
+                            <div className="flex gap-3">
+                              <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
+                                alert.type === 'price_drop' ? 'bg-emerald-500 shadow-glow-emerald' :
+                                alert.type === 'maintenance' ? 'bg-amber-500 shadow-glow-amber' :
+                                'bg-brand-primary shadow-glow'
+                              }`} />
+                              <div className="space-y-1">
+                                <p className="text-xs font-bold text-white leading-tight">{alert.title}</p>
+                                <p className="text-[10px] text-zinc-500 line-clamp-2 leading-relaxed">{alert.description}</p>
+                                <p className="text-[8px] text-zinc-600 font-mono uppercase">
+                                  {new Date(alert.created_at).toLocaleDateString()}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
             
             <Link to="/profile" className="flex items-center gap-3 pl-4 border-l border-white/5">
                <div className="text-right hidden md:block">

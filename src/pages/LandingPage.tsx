@@ -64,11 +64,12 @@ export default function LandingPage() {
             </div>
             
             <h1 className="text-5xl lg:text-7xl font-display font-black tracking-tighter leading-[0.9] mb-8 text-white">
-              Find Any Heavy-Duty Part in Seconds
+              TRUCKSAVER / <br />
+              <span className="text-brand-primary italic">PartsFinder Pro</span>
             </h1>
             
             <p className="text-xl text-zinc-400 leading-relaxed mb-10 max-w-xl">
-              Search 40+ suppliers at once — for trucks, cars, and fleets.
+              Enterprise-grade parts sourcing for workers, directors, and fleet operators. Search 200+ suppliers at once.
             </p>
 
             <div className="flex flex-wrap gap-4">
@@ -459,8 +460,8 @@ export default function LandingPage() {
               <div className="w-16 h-16 rounded-2xl bg-brand-primary/10 flex items-center justify-center text-brand-primary mb-8 group-hover:scale-110 transition-transform">
                 <Wrench size={32} />
               </div>
-              <h3 className="text-2xl font-black text-white uppercase tracking-tight mb-4">Mechanic</h3>
-              <p className="text-zinc-400 mb-8 min-h-[48px]">For independent techs and shop floor pros needing instant part ID.</p>
+              <h3 className="text-2xl font-black text-white uppercase tracking-tight mb-4">Worker</h3>
+              <p className="text-zinc-400 mb-8 min-h-[48px]">For mechanics and shop floor pros needing instant part identification and fitment verification.</p>
               <div className="flex items-center text-brand-primary font-bold text-sm uppercase tracking-widest">
                 Start Sourcing <ArrowRight size={16} className="ml-2 group-hover:translate-x-2 transition-transform" />
               </div>
@@ -477,10 +478,10 @@ export default function LandingPage() {
               <div className="w-16 h-16 rounded-2xl bg-brand-secondary/10 flex items-center justify-center text-brand-secondary mb-8 group-hover:scale-110 transition-transform">
                 <Users size={32} />
               </div>
-              <h3 className="text-2xl font-black text-white uppercase tracking-tight mb-4">Fleet Owner</h3>
-              <p className="text-zinc-400 mb-8 min-h-[48px]">For managers needing oversight, cost control, and team management.</p>
+              <h3 className="text-2xl font-black text-white uppercase tracking-tight mb-4">Director</h3>
+              <p className="text-zinc-400 mb-8 min-h-[48px]">For fleet owners and managers needing team oversight, cost analytics, and seat management.</p>
               <div className="flex items-center text-brand-secondary font-bold text-sm uppercase tracking-widest">
-                Deploy Fleet <ArrowRight size={16} className="ml-2 group-hover:translate-x-2 transition-transform" />
+                Manage Fleet <ArrowRight size={16} className="ml-2 group-hover:translate-x-2 transition-transform" />
               </div>
             </Link>
             </motion.div>
@@ -500,9 +501,9 @@ export default function LandingPage() {
           <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
             <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.1 }}>
             <PricingCard 
-              title="Individual" 
+              title="Worker" 
               price="$49.99" 
-              features={['AI Visual Search', 'VIN Fitment Lock', '40+ Supplier Compare', 'Unlimited Searches']}
+              features={['AI Visual Search', 'VIN Fitment Lock', '200+ Supplier Compare', 'Unlimited Searches']}
               cta="Subscribe"
               link="/register/mechanic"
             />
@@ -512,7 +513,7 @@ export default function LandingPage() {
               title="Director" 
               price="$49.99" 
               perSeat={true}
-              features={['Everything in Individual', 'Fleet Dashboard', 'Worker Management', 'Centralized Billing', 'Search History Tracking']}
+              features={['Everything in Worker', 'Director Dashboard', 'Worker Management', 'Centralized Billing', 'Team Analytics']}
               cta="Subscribe"
               featured
               link="/register/owner"

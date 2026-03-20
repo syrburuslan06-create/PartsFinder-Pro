@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, UserPlus, Trash2, Mail, Shield, ShieldCheck, ShieldAlert, X, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Users, UserPlus, Trash2, Mail, Shield, ShieldCheck, ShieldAlert, X, Loader2, AlertTriangle, CheckCircle2, Copy, ExternalLink } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
 import { supabase } from '../lib/supabase';
 
@@ -9,14 +9,16 @@ export default function WorkersPage() {
   const currentUserStr = localStorage.getItem('currentUser');
   const currentUser = currentUserStr ? JSON.parse(currentUserStr) : null;
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [workerToDelete, setWorkerToDelete] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [newWorker, setNewWorker] = useState({
     name: '',
     email: '',
-    role: 'mechanic' as 'mechanic' | 'director'
+    role: 'worker' as 'worker' | 'director'
   });
+  const [generatedInvite, setGeneratedInvite] = useState<{ code: string; link: string } | null>(null);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -31,8 +33,26 @@ export default function WorkersPage() {
     }
   }, []);
 
-  const deleteWorker = (id: string) => {
-    setWorkers(workers.filter(w => w.id !== id));
+  const deleteWorker = async (id: string) => {
+    setIsProcessing(true);
+    setError(null);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ company_id: null })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      setWorkers(workers.filter(w => w.id !== id));
+      setSuccess('Worker removed from company successfully.');
+      setWorkerToDelete(null);
+    } catch (err: any) {
+      console.error('Error deleting worker:', err);
+      setError(err.message || 'Failed to remove worker.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleBuySeat = async () => {
@@ -82,23 +102,53 @@ export default function WorkersPage() {
     }
   };
 
-  const handleAddWorker = (e: React.FormEvent) => {
+  const handleAddWorker = async (e: React.FormEvent) => {
     e.preventDefault();
-    // In a real app, this would check if they have available seats first
-    // For now, we just add the worker to the local state
-    const worker = {
-      id: Math.random().toString(36).substr(2, 9),
-      ...newWorker,
-      status: 'active' as const,
-      joinedAt: new Date().toISOString().split('T')[0]
-    };
-    setWorkers([worker, ...workers]);
-    setIsAddModalOpen(false);
-    setNewWorker({ name: '', email: '', role: 'mechanic' });
-    setSuccess('Worker added successfully.');
+    setIsProcessing(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      // Get company ID
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.company_id) throw new Error('Company not found. Please register as a director first.');
+
+      // Generate a unique invite code
+      const inviteCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+
+      const { error: inviteError } = await supabase
+        .from('company_invites')
+        .insert({
+          company_id: profile.company_id,
+          email: newWorker.email,
+          role: newWorker.role,
+          code: inviteCode
+        });
+
+      if (inviteError) throw inviteError;
+
+      setIsAddModalOpen(false);
+      const link = `${window.location.origin}/register/mechanic?invite=${inviteCode}`;
+      setGeneratedInvite({ code: inviteCode, link });
+      setNewWorker({ name: '', email: '', role: 'worker' });
+      setSuccess(`Invite generated for ${newWorker.email}`);
+    } catch (err: any) {
+      console.error('Error adding worker:', err);
+      setError(err.message || 'Failed to generate invite.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  if (currentUser?.role !== 'director' && currentUser?.role !== 'owner') {
+  if (currentUser?.role !== 'director') {
     return (
       <div className="flex flex-col items-center justify-center p-20 text-center space-y-6">
         <div className="w-20 h-20 rounded-3xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-500">
@@ -121,7 +171,7 @@ export default function WorkersPage() {
           <h1 className="text-5xl font-display font-black text-white tracking-tighter leading-none">
             WORKFORCE <span className="text-brand-primary italic">PORTAL.</span>
           </h1>
-          <p className="text-zinc-400 font-medium">Manage your team of mechanics and directors.</p>
+          <p className="text-zinc-400 font-medium">Manage your team of workers and directors.</p>
         </div>
         <div className="flex gap-4">
           <button 
@@ -215,7 +265,7 @@ export default function WorkersPage() {
                   <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Active</span>
                 </div>
                 <button 
-                  onClick={() => deleteWorker(worker.id)}
+                  onClick={() => setWorkerToDelete(worker.id)}
                   className="p-3 rounded-xl bg-white/5 border border-white/10 text-zinc-500 hover:text-rose-500 transition-colors"
                 >
                   <Trash2 size={18} />
@@ -225,6 +275,127 @@ export default function WorkersPage() {
           ))}
         </AnimatePresence>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {workerToDelete && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-6 bg-bg/60 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="tactile-card w-full max-w-md border-white/10 p-8 space-y-6"
+            >
+              <div className="flex flex-col items-center text-center space-y-4">
+                <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-500">
+                  <AlertTriangle size={32} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-display font-black text-white">Remove Worker?</h3>
+                  <p className="text-zinc-400 text-sm font-medium">
+                    This will remove the worker from your company. They will no longer have access to company data.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setWorkerToDelete(null)}
+                  className="flex-1 py-4 rounded-xl bg-white/5 border border-white/10 text-white font-black uppercase tracking-widest text-[10px] hover:bg-white/10 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => deleteWorker(workerToDelete)}
+                  disabled={isProcessing}
+                  className="flex-1 py-4 rounded-xl bg-rose-500 text-white font-black uppercase tracking-widest text-[10px] shadow-glow-rose hover:bg-rose-600 transition-all disabled:opacity-50"
+                >
+                  {isProcessing ? <Loader2 className="animate-spin mx-auto" size={16} /> : 'Remove Worker'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {generatedInvite && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-6 bg-bg/60 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="tactile-card w-full max-w-md border-white/10 p-8 space-y-6 relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-1 bg-emerald-500" />
+              
+              <button 
+                onClick={() => setGeneratedInvite(null)}
+                className="absolute top-4 right-4 p-2 text-zinc-500 hover:text-white transition-colors"
+              >
+                <X size={20} />
+              </button>
+
+              <div className="flex flex-col items-center text-center space-y-4">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500">
+                  <CheckCircle2 size={32} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-display font-black text-white uppercase italic">Invite Ready</h3>
+                  <p className="text-zinc-400 text-sm font-medium">
+                    Share this unique code or link with your new team member.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Invite Code</label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 tactile-input py-3 px-4 text-center font-mono text-xl font-black text-brand-primary tracking-widest">
+                      {generatedInvite.code}
+                    </div>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(generatedInvite.code);
+                        alert('Code copied to clipboard!');
+                      }}
+                      className="p-3 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all"
+                    >
+                      <Copy size={20} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Direct Link</label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 tactile-input py-3 px-4 text-xs font-medium text-zinc-400 truncate">
+                      {generatedInvite.link}
+                    </div>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(generatedInvite.link);
+                        alert('Link copied to clipboard!');
+                      }}
+                      className="p-3 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all"
+                    >
+                      <Copy size={20} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setGeneratedInvite(null)}
+                className="tactile-btn-light w-full py-4 text-[10px] font-black uppercase tracking-widest"
+              >
+                Done
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Add Worker Modal */}
       <AnimatePresence>
@@ -257,13 +428,13 @@ export default function WorkersPage() {
                     <div className="flex p-1.5 bg-white/5 rounded-xl border border-white/10 gap-2">
                       <button
                         type="button"
-                        onClick={() => setNewWorker({ ...newWorker, role: 'mechanic' })}
+                        onClick={() => setNewWorker({ ...newWorker, role: 'worker' })}
                         className={`flex-1 py-3 rounded-lg flex items-center justify-center gap-2 transition-all ${
-                          newWorker.role === 'mechanic' ? 'bg-white/10 text-white' : 'text-zinc-500'
+                          newWorker.role === 'worker' ? 'bg-white/10 text-white' : 'text-zinc-500'
                         }`}
                       >
                         <Shield size={14} />
-                        <span className="font-black uppercase tracking-widest text-[10px]">Mechanic</span>
+                        <span className="font-black uppercase tracking-widest text-[10px]">Worker</span>
                       </button>
                       <button
                         type="button"

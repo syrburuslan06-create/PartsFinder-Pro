@@ -4,17 +4,18 @@ import {
   Search, Clock, Bookmark, CreditCard, 
   ArrowRight, Sparkles, Activity, Zap,
   TrendingUp, Calendar, ChevronRight,
-  Package, ExternalLink
+  Package, ExternalLink, Loader2
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { SearchResult } from '../services/geminiService';
+import { GeminiSearchResult as SearchResult } from '../types';
 import { useAppContext } from '../contexts/AppContext';
+import OnboardingGuide from '../components/OnboardingGuide';
 
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export default function UserHomePage() {
   const navigate = useNavigate();
-  const { savedParts } = useAppContext();
+  const { savedParts, searchHistory, inventory } = useAppContext();
   const [quickSearch, setQuickSearch] = useState('');
   const [userName, setUserName] = useState('OPERATOR');
   const [totalSearches, setTotalSearches] = useState(0);
@@ -22,11 +23,16 @@ export default function UserHomePage() {
   const [plan, setPlan] = useState('Free Trial');
   const [isPaid, setIsPaid] = useState(false);
   const [nextPayment, setNextPayment] = useState('N/A');
+  const [isLoading, setIsLoading] = useState(true);
   const userRole = localStorage.getItem('userRole') || 'mechanic';
 
   useEffect(() => {
     const fetchUserData = async () => {
-      if (!isSupabaseConfigured) return;
+      if (!isSupabaseConfigured) {
+        setIsLoading(false);
+        return;
+      }
+      setIsLoading(true);
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
@@ -69,15 +75,7 @@ export default function UserHomePage() {
               const totalMinutes = sessions.reduce((acc, curr) => acc + (curr.duration_minutes || 0), 0);
               setHoursActive(Math.round((totalMinutes / 60) * 10) / 10);
             } else if (sessionError && sessionError.code === '42P01') {
-              // Table doesn't exist, we can't create it from client, just set to 0
               setHoursActive(0);
-            } else if (sessions && sessions.length === 0) {
-              // Create initial session
-              await supabase.from('user_sessions').insert({
-                user_id: user.id,
-                started_at: new Date().toISOString(),
-                duration_minutes: 0
-              });
             }
           } catch (e) {
             console.error('Error fetching sessions:', e);
@@ -85,6 +83,8 @@ export default function UserHomePage() {
         }
       } catch (error) {
         console.error('Error fetching user data:', error);
+      } finally {
+        setIsLoading(false);
       }
     };
     
@@ -94,13 +94,24 @@ export default function UserHomePage() {
   const handleQuickSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (quickSearch.trim()) {
-      // Navigate to search page with the query
       navigate(`/search?q=${encodeURIComponent(quickSearch)}`);
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-bg flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="animate-spin text-brand-primary mx-auto mb-4" size={48} />
+          <p className="text-white font-display font-black uppercase tracking-widest">Initializing Dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-bg pt-4 lg:pt-8 pb-32 lg:pb-8 px-4 lg:px-12 flex flex-col">
+      <OnboardingGuide />
       <div className="max-w-7xl mx-auto w-full space-y-4 lg:space-y-6 flex-1 flex flex-col">
         
         {/* Welcome Header */}
@@ -188,26 +199,44 @@ export default function UserHomePage() {
                   subValue="Lifetime"
                   color="text-emerald-500"
                 />
+                <StatCard 
+                  icon={<Bookmark size={18} />} 
+                  label="Saved Parts" 
+                  value={savedParts.length.toString()} 
+                  subValue="In Collection"
+                  color="text-brand-secondary"
+                />
+                <StatCard 
+                  icon={<Package size={18} />} 
+                  label="Inventory Items" 
+                  value={inventory.length.toString()} 
+                  subValue="Fleet Assets"
+                  color="text-amber-500"
+                />
               </div>
             </div>
 
             <div className="tactile-card p-6 bg-white/5 border-white/10">
               <h3 className="text-lg font-display font-black text-white mb-4 flex items-center gap-3">
-                <CreditCard size={18} className="text-brand-primary" />
-                Subscription
+                <Clock size={18} className="text-brand-primary" />
+                Recent History
               </h3>
               <div className="space-y-3">
-                <div className="flex justify-between items-center p-3 rounded-xl bg-white/5 border border-white/10">
-                  <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">Plan</span>
-                  <span className="text-xs font-black text-white uppercase">{plan}</span>
-                </div>
-                <div className="flex justify-between items-center p-3 rounded-xl bg-white/5 border border-white/10">
-                  <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">Status</span>
-                  <span className={`text-[9px] font-black uppercase flex items-center gap-2 ${isPaid ? 'text-emerald-500' : 'text-amber-500'}`}>
-                    <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${isPaid ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                    {isPaid ? 'Active' : 'Trial'}
-                  </span>
-                </div>
+                {searchHistory.length > 0 ? (
+                  searchHistory.map((search, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/10">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-black text-white truncate max-w-[150px]">{search.query}</span>
+                        <span className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">{search.vehicleInfo}</span>
+                      </div>
+                      <span className="text-[8px] font-bold text-zinc-600 uppercase tracking-widest">
+                        {new Date(search.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-center py-4 text-zinc-500 text-[10px] font-bold uppercase tracking-widest">No recent searches</p>
+                )}
               </div>
             </div>
           </div>
@@ -227,7 +256,7 @@ export default function UserHomePage() {
 
               <div className="space-y-3">
                 {savedParts.length > 0 ? (
-                  savedParts.map((part, idx) => (
+                  savedParts.slice(0, 5).map((part, idx) => (
                     <div key={idx} className="p-4 rounded-xl bg-white/5 border border-white/10 hover:border-brand-primary/30 transition-all group">
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
@@ -235,7 +264,7 @@ export default function UserHomePage() {
                             <Package className="text-zinc-500 group-hover:text-brand-primary transition-colors" size={20} />
                           </div>
                           <div>
-                            <p className="text-base font-black text-white group-hover:text-brand-primary transition-colors truncate max-w-[200px]">{part.partName}</p>
+                            <p className="text-base font-black text-white group-hover:text-brand-primary transition-colors truncate max-w-[200px]">{part.name}</p>
                             <p className="text-[9px] font-mono font-bold text-zinc-500 uppercase tracking-widest">{part.partNumber}</p>
                           </div>
                         </div>

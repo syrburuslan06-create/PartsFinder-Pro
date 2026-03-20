@@ -6,8 +6,17 @@ import { useAppContext } from '../contexts/AppContext';
 import { supabase } from '../lib/supabase';
 
 export default function SavedPartsPage() {
-  const { savedParts, setSavedParts } = useAppContext();
+  const { savedParts, setSavedParts, isOffline } = useAppContext();
   const [selectedPart, setSelectedPart] = useState<any | null>(null);
+
+  const formatPrice = (price: any) => {
+    if (typeof price === 'number') return `$${price.toFixed(2)}`;
+    if (typeof price === 'string') {
+      const numeric = parseFloat(price.replace(/[^0-9.]/g, ''));
+      return isNaN(numeric) ? price : `$${numeric.toFixed(2)}`;
+    }
+    return '$0.00';
+  };
 
   const removePart = async (id: string) => {
     const partToRemove = savedParts.find(p => p.id === id);
@@ -35,13 +44,22 @@ export default function SavedPartsPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-8 pb-20">
       <header className="space-y-2">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white text-[9px] font-black tracking-[0.2em] uppercase">
-          <Bookmark size={10} className="text-white" />
-          Personal Inventory
+        <div className="flex justify-between items-start">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white text-[9px] font-black tracking-[0.2em] uppercase">
+              <Bookmark size={10} className="text-white" />
+              Personal Inventory
+            </div>
+            <h1 className="text-5xl font-display font-black text-white tracking-tighter leading-none">
+              SAVED <span className="text-brand-primary italic">PARTS.</span>
+            </h1>
+          </div>
+          {isOffline && (
+            <div className="px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+              <AlertCircle size={12} /> Offline Mode
+            </div>
+          )}
         </div>
-        <h1 className="text-5xl font-display font-black text-white tracking-tighter leading-none">
-          SAVED <span className="text-brand-primary italic">PARTS.</span>
-        </h1>
         <p className="text-zinc-400 font-medium">Your curated list of sourced components and quotes.</p>
       </header>
 
@@ -99,7 +117,7 @@ export default function SavedPartsPage() {
                       <h3 className="text-lg font-display font-black text-white group-hover:text-brand-primary transition-colors line-clamp-1">
                         {part.partName}
                       </h3>
-                      <p className="text-xl font-display font-black text-white">${part.price.toFixed(2)}</p>
+                      <p className="text-xl font-display font-black text-white">{formatPrice(part.price)}</p>
                     </div>
                     <p className="text-[10px] text-zinc-500 font-mono font-bold uppercase tracking-widest">PN: {part.partNumber}</p>
                   </div>
@@ -117,8 +135,14 @@ export default function SavedPartsPage() {
 
                   <div className="flex gap-2 pt-2 mt-auto">
                     <button 
-                      onClick={() => handleRequestQuote(part)}
-                      className="flex-1 tactile-btn-light py-2.5 text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
+                      onClick={() => {
+                        if (isOffline) {
+                          alert('Cannot request quote while offline.');
+                          return;
+                        }
+                        handleRequestQuote(part);
+                      }}
+                      className={`flex-1 tactile-btn-light py-2.5 text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 ${isOffline ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       <MessageSquare size={12} /> Quote
                     </button>
@@ -170,7 +194,7 @@ export default function SavedPartsPage() {
                 <div className="grid grid-cols-2 gap-6">
                   <div className="p-6 rounded-3xl bg-white/5 shadow-glass border border-white/10 space-y-1">
                     <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Price</p>
-                    <p className="text-3xl font-display font-black text-white">${selectedPart.price.toFixed(2)}</p>
+                    <p className="text-3xl font-display font-black text-white">{formatPrice(selectedPart.price)}</p>
                   </div>
                   <div className="p-6 rounded-3xl bg-white/5 shadow-glass border border-white/10 space-y-1">
                     <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Compatibility</p>
@@ -201,11 +225,17 @@ export default function SavedPartsPage() {
 
                 <div className="pt-8 border-t border-white/10 flex gap-4">
                   <button 
-                    onClick={() => handleRequestQuote(selectedPart)}
-                    className="flex-1 tactile-btn-light py-5 text-sm font-black uppercase tracking-widest flex items-center justify-center gap-3"
+                    onClick={() => {
+                      if (isOffline) {
+                        alert('Cannot request quote while offline.');
+                        return;
+                      }
+                      handleRequestQuote(selectedPart);
+                    }}
+                    className={`flex-1 tactile-btn-light py-5 text-sm font-black uppercase tracking-widest flex items-center justify-center gap-3 ${isOffline ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <MessageSquare size={18} />
-                    Request Official Quote
+                    {isOffline ? 'Quote Unavailable Offline' : 'Request Official Quote'}
                   </button>
                   <button 
                     onClick={() => removePart(selectedPart.id)}

@@ -75,12 +75,12 @@ export default function RegisterRoleSelectionPage() {
               <div className="w-16 h-16 rounded-2xl bg-white/5 shadow-glass border border-white/10 flex items-center justify-center mb-6 group-hover:bg-brand-primary/10 group-hover:border-brand-primary/30 transition-all">
                 <UserCog size={32} className="text-white group-hover:text-brand-primary transition-colors" />
               </div>
-              <h2 className="text-xl lg:text-2xl font-display font-bold text-white mb-3 uppercase tracking-tight">Individual</h2>
+              <h2 className="text-xl lg:text-2xl font-display font-bold text-white mb-3 uppercase tracking-tight">Worker</h2>
               <p className="text-zinc-400 text-xs font-medium mb-8 flex-grow leading-relaxed">
-                Precision sourcing tools. Access technical specs, AI-powered compatibility checks, and direct supplier feeds for daily operations.
+                Precision sourcing tools for workers. Access technical specs, AI-powered compatibility checks, and direct supplier feeds.
               </p>
               <div className="tactile-btn-dark w-full py-3 group-hover:bg-white/10 transition-all text-xs">
-                Register as Individual
+                Register as Worker
                 <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform ml-2" />
               </div>
             </div>

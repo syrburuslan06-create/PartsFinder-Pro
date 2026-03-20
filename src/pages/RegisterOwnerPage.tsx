@@ -31,7 +31,7 @@ export default function RegisterOwnerPage() {
       
       // Note: Role assignment and profile creation would typically happen 
       // in a callback or via Supabase triggers/functions
-      localStorage.setItem('userRole', 'owner');
+      localStorage.setItem('userRole', 'director');
     } catch (error) {
       console.error('Supabase Google login error:', error);
       alert('Failed to initialize Google login. Please ensure Supabase is correctly configured.');
@@ -61,7 +61,7 @@ export default function RegisterOwnerPage() {
         options: {
           data: {
             full_name: formData.name,
-            role: 'owner'
+            role: 'director'
           }
         }
       });
@@ -141,8 +141,8 @@ export default function RegisterOwnerPage() {
           // 2. Create Profile
           const { error: profileError } = await supabase.from('profiles').insert({
             id: authUser.id,
-            full_name: formData.name || 'Owner',
-            role: 'owner',
+            full_name: formData.name || 'Director',
+            role: 'director',
             company_id: companyId
           });
           
@@ -151,12 +151,12 @@ export default function RegisterOwnerPage() {
           }
         }
 
-        localStorage.setItem('userRole', 'owner');
+        localStorage.setItem('userRole', 'director');
         localStorage.setItem('userEmail', normalizedEmail);
         localStorage.setItem('currentUser', JSON.stringify({
-          name: formData.name || 'Owner',
+          name: formData.name || 'Director',
           email: normalizedEmail,
-          role: 'owner'
+          role: 'director'
         }));
         if (companyId) localStorage.setItem('companyId', companyId);
         

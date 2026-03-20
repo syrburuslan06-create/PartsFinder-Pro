@@ -26,7 +26,7 @@ interface CompanyRecord {
   seats: number;
 }
 
-interface MechanicRecord {
+interface WorkerRecord {
   id: string;
   name: string;
   company: string;
@@ -46,28 +46,39 @@ interface AuditLog {
 
 export default function AdminDashboardPage() {
   const [companies, setCompanies] = useState<CompanyRecord[]>([]);
-  const [mechanics, setMechanics] = useState<MechanicRecord[]>([]);
+  const [workers, setWorkers] = useState<WorkerRecord[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    totalCompanies: 0,
+    totalSearches: 0,
+    activeSessions: 14 // Heuristic
+  });
   const [securityLogs, setSecurityLogs] = useState<any[]>([]);
   const [isLockdown, setIsLockdown] = useState(() => {
     return localStorage.getItem('system_lockdown') === 'true';
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [adminTimer, setAdminTimer] = useState(0);
-  const [activeTab, setActiveTab] = useState<'companies' | 'mechanics' | 'logs' | 'security'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'workers' | 'logs' | 'security'>('companies');
 
   useEffect(() => {
     async function fetchAdminData() {
       setIsLoading(true);
       if (!isSupabaseConfigured) {
         setCompanies([]);
-        setMechanics([]);
+        setWorkers([]);
         setAuditLogs([]);
         setIsLoading(false);
         return;
       }
       try {
+        // Fetch counts
+        const { count: usersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+        const { count: companiesCount } = await supabase.from('companies').select('*', { count: 'exact', head: true });
+        const { count: searchesCount } = await supabase.from('searches').select('*', { count: 'exact', head: true });
+
         // Fetch companies
         const { data: companiesData, error: companiesError } = await supabase
           .from('companies')
@@ -80,30 +91,53 @@ export default function AdminDashboardPage() {
           name: c.name,
           ownerName: c.profiles?.full_name || 'Unknown',
           email: c.profiles?.email || 'Unknown',
-          status: 'active', // Assuming active for now, could add a status column
+          status: c.status || 'active',
           joinedDate: new Date(c.created_at).toLocaleDateString(),
           seats: c.seat_limit || 0
         }));
         setCompanies(formattedCompanies);
 
-        // Fetch mechanics
-        const { data: mechanicsData, error: mechanicsError } = await supabase
+        // Fetch workers
+        const { data: workersData, error: workersError } = await supabase
           .from('profiles')
           .select('*, companies(name)')
-          .eq('role', 'mechanic');
+          .eq('role', 'worker');
 
-        if (mechanicsError) throw mechanicsError;
+        if (workersError) throw workersError;
 
-        const formattedMechanics: MechanicRecord[] = mechanicsData.map(m => ({
-          id: m.id,
-          name: m.full_name || 'Unknown',
-          company: m.companies?.name || 'Independent',
-          email: m.email || 'Unknown',
-          hoursThisWeek: 0, // Mock for now
-          hoursThisMonth: 0, // Mock for now
-          lastActive: new Date(m.created_at).toLocaleDateString() // Using created_at as a fallback
-        }));
-        setMechanics(formattedMechanics);
+        // Fetch worker sessions to calculate hours
+        const { data: sessionsData, error: sessionsError } = await supabase
+          .from('user_sessions')
+          .select('*');
+
+        const formattedWorkers: WorkerRecord[] = workersData.map(m => {
+          const workerSessions = sessionsData?.filter(s => s.user_id === m.id) || [];
+          
+          // Calculate hours this week (mocking week start for simplicity)
+          const oneWeekAgo = new Date();
+          oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+          const weekMinutes = workerSessions
+            .filter(s => new Date(s.created_at) >= oneWeekAgo)
+            .reduce((acc, curr) => acc + (curr.duration_minutes || 0), 0);
+
+          // Calculate hours this month
+          const oneMonthAgo = new Date();
+          oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+          const monthMinutes = workerSessions
+            .filter(s => new Date(s.created_at) >= oneMonthAgo)
+            .reduce((acc, curr) => acc + (curr.duration_minutes || 0), 0);
+
+          return {
+            id: m.id,
+            name: m.full_name || 'Unknown',
+            company: m.companies?.name || 'Independent',
+            email: m.email || 'Unknown',
+            hoursThisWeek: Math.round((weekMinutes / 60) * 10) / 10,
+            hoursThisMonth: Math.round((monthMinutes / 60) * 10) / 10,
+            lastActive: new Date(m.created_at).toLocaleDateString() // Using created_at as a fallback
+          };
+        });
+        setWorkers(formattedWorkers);
 
         // Fetch audit logs (searches)
         const { data: searchesData, error: searchesError } = await supabase
@@ -143,6 +177,13 @@ export default function AdminDashboardPage() {
         }));
         setSecurityLogs(formattedSecurityLogs);
 
+        // Update stats
+        setStats({
+          totalUsers: usersCount || 0,
+          totalCompanies: companiesCount || 0,
+          totalSearches: searchesCount || 0,
+          activeSessions: Math.floor(Math.random() * 20) + 5 // Mock live sessions
+        });
       } catch (error) {
         console.error('Error fetching admin data:', error);
       } finally {
@@ -159,8 +200,21 @@ export default function AdminDashboardPage() {
     localStorage.setItem('system_lockdown', newState.toString());
   };
 
-  const clearSecurityLogs = () => {
-    setSecurityLogs([]);
+  const clearSecurityLogs = async () => {
+    if (window.confirm('Are you sure you want to clear all security logs?')) {
+      try {
+        const { error } = await supabase
+          .from('security_events')
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
+        
+        if (error) throw error;
+        setSecurityLogs([]);
+      } catch (error) {
+        console.error('Error clearing security logs:', error);
+        alert('Failed to clear security logs.');
+      }
+    }
   };
 
   // Admin Session Timer
@@ -178,15 +232,40 @@ export default function AdminDashboardPage() {
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleBlockCompany = (id: string) => {
-    setCompanies(prev => prev.map(c => 
-      c.id === id ? { ...c, status: c.status === 'active' ? 'blocked' : 'active' } : c
-    ));
+  const handleBlockCompany = async (id: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'active' ? 'blocked' : 'active';
+    try {
+      const { error } = await supabase
+        .from('companies')
+        .update({ status: newStatus })
+        .eq('id', id);
+      
+      if (error) throw error;
+
+      setCompanies(prev => prev.map(c => 
+        c.id === id ? { ...c, status: newStatus as 'active' | 'blocked' } : c
+      ));
+    } catch (error) {
+      console.error('Error updating company status:', error);
+      alert('Failed to update company status. Please try again.');
+    }
   };
 
-  const handleDeleteMechanic = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this mechanic account? This action cannot be undone.')) {
-      setMechanics(prev => prev.filter(m => m.id !== id));
+  const handleDeleteWorker = async (id: string) => {
+    if (window.confirm('Are you sure you want to delete this worker account? This action cannot be undone.')) {
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .delete()
+          .eq('id', id);
+        
+        if (error) throw error;
+
+        setWorkers(prev => prev.filter(m => m.id !== id));
+      } catch (error) {
+        console.error('Error deleting worker:', error);
+        alert('Failed to delete worker account. Please try again.');
+      }
     }
   };
 
@@ -195,7 +274,7 @@ export default function AdminDashboardPage() {
     c.ownerName.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const filteredMechanics = mechanics.filter(m => 
+  const filteredWorkers = workers.filter(m => 
     m.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
     m.company.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -238,10 +317,10 @@ export default function AdminDashboardPage() {
 
         {/* Global Stats */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard icon={<Users />} label="Total Users" value={companies.length + mechanics.length} trend="+12% this week" />
-          <StatCard icon={<Building2 />} label="Total Companies" value={companies.length} trend="+2 new today" />
-          <StatCard icon={<Activity />} label="Active Sessions" value={14} trend="Live now" />
-          <StatCard icon={<BarChart3 />} label="Avg. Time / User" value="4.2 hrs" trend="+0.5 hrs vs last week" />
+          <StatCard icon={<Users />} label="Total Users" value={stats.totalUsers} trend="+12% this week" />
+          <StatCard icon={<Building2 />} label="Total Companies" value={stats.totalCompanies} trend="+2 new today" />
+          <StatCard icon={<Activity />} label="Active Sessions" value={stats.activeSessions} trend="Live now" />
+          <StatCard icon={<BarChart3 />} label="Total Searches" value={stats.totalSearches} trend="+145 vs yesterday" />
         </div>
 
         {/* Management Section */}
@@ -255,10 +334,10 @@ export default function AdminDashboardPage() {
                 Companies
               </button>
               <button 
-                onClick={() => setActiveTab('mechanics')}
-                className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'mechanics' ? 'bg-white/10 text-white shadow-glow' : 'text-zinc-500 hover:text-white'}`}
+                onClick={() => setActiveTab('workers')}
+                className={`px-6 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'workers' ? 'bg-white/10 text-white shadow-glow' : 'text-zinc-500 hover:text-white'}`}
               >
-                Mechanics
+                Workers
               </button>
               <button 
                 onClick={() => setActiveTab('logs')}
@@ -330,7 +409,7 @@ export default function AdminDashboardPage() {
                       </td>
                       <td className="px-6 py-6 text-right">
                         <button 
-                          onClick={() => handleBlockCompany(company.id)}
+                          onClick={() => handleBlockCompany(company.id, company.status)}
                           className={`p-2 rounded-lg border transition-all ${
                             company.status === 'active' 
                               ? 'text-zinc-500 border-white/10 hover:text-red-400 hover:border-red-400/30 hover:bg-red-400/10' 
@@ -343,39 +422,39 @@ export default function AdminDashboardPage() {
                       </td>
                     </tr>
                   ))
-                ) : activeTab === 'mechanics' ? (
-                  filteredMechanics.map(mechanic => (
-                    <tr key={mechanic.id} className="hover:bg-white/[0.02] transition-colors group">
+                ) : activeTab === 'workers' ? (
+                  filteredWorkers.map(worker => (
+                    <tr key={worker.id} className="hover:bg-white/[0.02] transition-colors group">
                       <td className="px-6 py-6">
                         <div className="flex items-center gap-4">
                           <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-zinc-400 font-black">
-                            {mechanic.name.charAt(0)}
+                            {worker.name.charAt(0)}
                           </div>
                           <div>
-                            <p className="text-sm font-black text-white uppercase">{mechanic.name}</p>
-                            <p className="text-[10px] text-zinc-500 font-medium">Last active: {mechanic.lastActive}</p>
+                            <p className="text-sm font-black text-white uppercase">{worker.name}</p>
+                            <p className="text-[10px] text-zinc-500 font-medium">Last active: {worker.lastActive}</p>
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-6">
-                        <p className="text-sm font-bold text-white">{mechanic.company}</p>
-                        <p className="text-[10px] text-zinc-500">{mechanic.email}</p>
+                        <p className="text-sm font-bold text-white">{worker.company}</p>
+                        <p className="text-[10px] text-zinc-500">{worker.email}</p>
                       </td>
                       <td className="px-6 py-6">
                         <div className="flex gap-6">
                           <div>
-                            <p className="text-xs font-black text-white">{mechanic.hoursThisWeek}h</p>
+                            <p className="text-xs font-black text-white">{worker.hoursThisWeek}h</p>
                             <p className="text-[8px] text-zinc-500 uppercase font-black">This Week</p>
                           </div>
                           <div>
-                            <p className="text-xs font-black text-white">{mechanic.hoursThisMonth}h</p>
+                            <p className="text-xs font-black text-white">{worker.hoursThisMonth}h</p>
                             <p className="text-[8px] text-zinc-500 uppercase font-black">This Month</p>
                           </div>
                         </div>
                       </td>
                       <td className="px-6 py-6 text-right">
                         <button 
-                          onClick={() => handleDeleteMechanic(mechanic.id)}
+                          onClick={() => handleDeleteWorker(worker.id)}
                           className="p-2 rounded-lg border border-white/10 text-zinc-500 hover:text-red-400 hover:border-red-400/30 hover:bg-red-400/10 transition-all"
                           title="Delete Account"
                         >

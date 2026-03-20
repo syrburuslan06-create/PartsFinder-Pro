@@ -1,37 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import { GeminiSearchResult, SearchResponse, VinDetails } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-
-export interface SearchResult {
-  partName: string;
-  partNumber: string;
-  compatibility: string;
-  price: string;
-  availability: 'In Stock' | 'Low Stock' | 'Out of Stock';
-  supplier: string;
-  confidence: number;
-  description: string;
-  rating: number;
-  reviewsCount: number;
-  sourceUrl?: string;
-}
-
-export interface SearchResponse {
-  results: SearchResult[];
-  groundingMetadata?: any;
-}
-
-export interface VinDetails {
-  year: string;
-  make: string;
-  model: string;
-  engine: string;
-  trim: string;
-  transmission: string;
-  driveType: string;
-  bodyStyle: string;
-  manufacturedIn: string;
-}
 
 export async function decodeVin(vin: string): Promise<VinDetails | null> {
   const model = "gemini-3-flash-preview";
@@ -117,6 +87,14 @@ export async function searchParts(params: {
     7. ONLY return parts that have a user rating between 3.5 and 5.0 stars.
     8. Prioritize parts with the best value (competitive pricing and high ratings).
     9. If a VIN or specific vehicle details are provided, ensure exact fitment verification.
+    10. Calculate a 'Trust Score' for each result using the following Enterprise Formula:
+        Trust Score = (partNumberMatch * 0.3) + (priceCompetitiveness * 0.2) + (supplierReliability * 0.2) + (historicalSuccess * 0.1) + (userRating * 0.1) + (aiConfidence * 0.1)
+        - partNumberMatch: 100 if exact, 0-90 if partial/related.
+        - priceCompetitiveness: 100 if lowest price found, lower if higher.
+        - supplierReliability: Based on known US supplier reputation (e.g., RockAuto/NAPA = 95+, others vary).
+        - historicalSuccess: Estimated based on part popularity and reviews.
+        - userRating: (rating / 5) * 100.
+        - aiConfidence: Your internal confidence in the fitment match (0-100).
     
     Search Parameters:
     - Vehicle Identification (VIN/Name): ${params.vehicle || 'Not specified'}
@@ -163,9 +141,22 @@ export async function searchParts(params: {
               description: { type: Type.STRING },
               rating: { type: Type.NUMBER, description: "Average user rating from 0 to 5" },
               reviewsCount: { type: Type.INTEGER, description: "Number of user reviews" },
-              sourceUrl: { type: Type.STRING, description: "Direct URL to purchase the part" }
+              sourceUrl: { type: Type.STRING, description: "Direct URL to purchase the part" },
+              trustScore: { type: Type.NUMBER, description: "Calculated Enterprise Trust Score (0-100)" },
+              scoringDetails: {
+                type: Type.OBJECT,
+                properties: {
+                  partNumberMatch: { type: Type.NUMBER },
+                  priceCompetitiveness: { type: Type.NUMBER },
+                  supplierReliability: { type: Type.NUMBER },
+                  historicalSuccess: { type: Type.NUMBER },
+                  userRating: { type: Type.NUMBER },
+                  aiConfidence: { type: Type.NUMBER }
+                },
+                required: ['partNumberMatch', 'priceCompetitiveness', 'supplierReliability', 'historicalSuccess', 'userRating', 'aiConfidence']
+              }
             },
-            required: ['partName', 'partNumber', 'compatibility', 'price', 'availability', 'supplier', 'confidence', 'description', 'rating', 'reviewsCount']
+            required: ['partName', 'partNumber', 'compatibility', 'price', 'availability', 'supplier', 'confidence', 'description', 'rating', 'reviewsCount', 'trustScore', 'scoringDetails']
           }
         }
       }

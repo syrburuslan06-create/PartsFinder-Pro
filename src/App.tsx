@@ -22,9 +22,11 @@ import ResultsPage from './pages/ResultsPage';
 import AlertsPage from './pages/AlertsPage';
 import InventoryPage from './pages/InventoryPage';
 import DashboardPage from './pages/DashboardPage';
+import OwnerDashboardPage from './pages/OwnerDashboardPage';
 import SupplierDashboardPage from './pages/SupplierDashboardPage';
 import WorkersPage from './pages/WorkersPage';
 import AdminDashboardPage from './pages/AdminDashboardPage';
+import SupportPage from './pages/SupportPage';
 import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
 import NotFoundPage from './pages/NotFoundPage';
@@ -37,14 +39,14 @@ interface RoleProtectedRouteProps {
 }
 
 function RoleProtectedRoute({ children, allowedRoles }: RoleProtectedRouteProps) {
-  const userRole = localStorage.getItem('userRole');
+  const { currentUser } = useAppContext();
   const location = useLocation();
   
-  if (!userRole) {
+  if (!currentUser) {
     return <Navigate to="/login" state={{ from: location, message: "Please log in to continue" }} replace />;
   }
   
-  if (!allowedRoles.includes(userRole)) {
+  if (!allowedRoles.includes(currentUser.role)) {
     return <Navigate to="/home" replace />;
   }
   
@@ -52,10 +54,10 @@ function RoleProtectedRoute({ children, allowedRoles }: RoleProtectedRouteProps)
 }
 
 function SharedProtectedRoute({ children }: { children: React.ReactNode }) {
-  const userRole = localStorage.getItem('userRole');
+  const { currentUser } = useAppContext();
   const location = useLocation();
   
-  if (!userRole) {
+  if (!currentUser) {
     return <Navigate to="/login" state={{ from: location, message: "Please log in to continue" }} replace />;
   }
   
@@ -77,20 +79,21 @@ export default function App() {
           <Route path="/payment" element={<PublicLayout><PaymentPage /></PublicLayout>} />
           <Route path="/privacy" element={<PublicLayout><PrivacyPage /></PublicLayout>} />
           <Route path="/terms" element={<PublicLayout><TermsPage /></PublicLayout>} />
+          <Route path="/support" element={<PublicLayout><SupportPage /></PublicLayout>} />
 
           {/* Protected Routes */}
-          <Route path="/owner/dashboard" element={<RoleProtectedRoute allowedRoles={['director', 'owner', 'super_admin']}><DashboardPage /></RoleProtectedRoute>} />
+          <Route path="/owner/dashboard" element={<RoleProtectedRoute allowedRoles={['director', 'super_admin']}><OwnerDashboardPage /></RoleProtectedRoute>} />
           <Route path="/supplier/dashboard" element={<RoleProtectedRoute allowedRoles={['supplier', 'super_admin']}><SupplierDashboardPage /></RoleProtectedRoute>} />
-          <Route path="/search" element={<RoleProtectedRoute allowedRoles={['mechanic', 'super_admin']}><SearchPage /></RoleProtectedRoute>} />
-          <Route path="/results" element={<RoleProtectedRoute allowedRoles={['mechanic', 'super_admin']}><ResultsPage /></RoleProtectedRoute>} />
+          <Route path="/search" element={<RoleProtectedRoute allowedRoles={['worker', 'super_admin']}><SearchPage /></RoleProtectedRoute>} />
+          <Route path="/results" element={<RoleProtectedRoute allowedRoles={['worker', 'super_admin']}><ResultsPage /></RoleProtectedRoute>} />
           <Route path="/saved" element={<SharedProtectedRoute><SavedPartsPage /></SharedProtectedRoute>} />
           <Route path="/alerts" element={<SharedProtectedRoute><AlertsPage /></SharedProtectedRoute>} />
-          <Route path="/inventory" element={<RoleProtectedRoute allowedRoles={['director', 'owner', 'super_admin']}><InventoryPage /></RoleProtectedRoute>} />
+          <Route path="/inventory" element={<RoleProtectedRoute allowedRoles={['director', 'super_admin']}><InventoryPage /></RoleProtectedRoute>} />
           <Route path="/profile" element={<SharedProtectedRoute><ProfilePage /></SharedProtectedRoute>} />
-          <Route path="/home" element={<RoleProtectedRoute allowedRoles={['mechanic', 'super_admin']}><UserHomePage /></RoleProtectedRoute>} />
+          <Route path="/home" element={<RoleProtectedRoute allowedRoles={['worker', 'super_admin']}><UserHomePage /></RoleProtectedRoute>} />
 
           {/* Director Only Routes */}
-          <Route path="/workers" element={<RoleProtectedRoute allowedRoles={['director', 'owner', 'super_admin']}><WorkersPage /></RoleProtectedRoute>} />
+          <Route path="/workers" element={<RoleProtectedRoute allowedRoles={['director', 'super_admin']}><WorkersPage /></RoleProtectedRoute>} />
 
           {/* Super Admin Only Routes */}
           <Route path="/admin" element={<RoleProtectedRoute allowedRoles={['super_admin']}><AdminDashboardPage /></RoleProtectedRoute>} />

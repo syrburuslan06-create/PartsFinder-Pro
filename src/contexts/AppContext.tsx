@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { Alert, GeminiSearchResult } from '../types';
+import { AlertsService } from '../services/alertsService';
 
-export type UserRole = 'super_admin' | 'individual' | 'director' | 'worker';
+export type UserRole = 'super_admin' | 'director' | 'worker' | 'supplier';
 
 interface User {
   name: string;
@@ -20,24 +22,17 @@ interface Part {
   savedAt?: string;
 }
 
-interface Alert {
-  id: number;
-  type: 'price_drop' | 'back_in_stock';
-  partName: string;
-  partNumber: string;
-  currentPrice: string;
-  status: 'active' | 'inactive';
-}
-
 interface Vehicle {
-  id: number;
+  id: string;
   type: 'truck' | 'car';
   make: string;
   model: string;
   year: string;
   engine: string;
   vin?: string;
-  nickname?: string;
+  name: string;
+  status?: 'active' | 'maintenance' | 'inactive';
+  lastService?: string;
 }
 
 export interface SearchEntry {
@@ -59,17 +54,77 @@ interface AppContextType {
   setInventory: React.Dispatch<React.SetStateAction<Vehicle[]>>;
   workers: any[];
   setWorkers: React.Dispatch<React.SetStateAction<any[]>>;
+  fetchAlerts: () => Promise<void>;
+  markAlertAsRead: (id: string) => Promise<void>;
+  markAllAlertsAsRead: () => Promise<void>;
+  deleteAllAlerts: () => Promise<void>;
   totalSearches: number;
   incrementSearches: () => void;
+  isOffline: boolean;
+  featureFlags: Record<string, boolean>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({
+    enableTrustScore: true,
+    enableCompare: true,
+    enableAIAssistant: true,
+    enableOfflineSync: true,
+  });
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('currentUser');
     return saved ? JSON.parse(saved) : null;
   });
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+            
+          if (!error && data) {
+            const updatedUser = {
+              id: user.id,
+              name: data.full_name || user.email?.split('@')[0] || 'User',
+              email: user.email || '',
+              role: data.role as UserRole,
+              companyName: data.company_name,
+              createdAt: data.created_at,
+              isPaid: data.is_paid,
+              plan: data.plan
+            } as any;
+            setCurrentUser(updatedUser);
+            localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching profile:', error);
+      }
+    };
+    fetchProfile();
+  }, []);
 
   const [savedParts, setSavedParts] = useState<Part[]>(() => {
     const saved = localStorage.getItem('savedParts');
@@ -109,44 +164,164 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     fetchSavedParts();
   }, []);
 
-  const [searchHistory, setSearchHistory] = useState<SearchEntry[]>(() => {
-    const saved = localStorage.getItem('searchHistory');
-    if (saved) return JSON.parse(saved);
-    return [];
-  });
+  const [searchHistory, setSearchHistory] = useState<SearchEntry[]>([]);
   
-  const [alerts, setAlerts] = useState<Alert[]>(() => {
-    const saved = localStorage.getItem('alerts');
-    if (saved) return JSON.parse(saved);
-    return [
-      { id: 1, type: "price_drop", partName: "Air Brake Compressor", partNumber: "5018485X", currentPrice: "$589.99", status: "active" },
-      { id: 2, type: "back_in_stock", partName: "Turbocharger Assembly", partNumber: "3592778", currentPrice: "$1,249.00", status: "active" }
-    ];
-  });
+  useEffect(() => {
+    const fetchSearchHistory = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data, error } = await supabase
+            .from('search_history')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(5);
+            
+          if (!error && data) {
+            const mappedHistory = data.map(item => ({
+              query: item.query,
+              vehicleInfo: item.search_type || 'Unknown Vehicle',
+              timestamp: item.created_at
+            }));
+            setSearchHistory(mappedHistory);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching search history:', error);
+      }
+    };
+    fetchSearchHistory();
+  }, []);
 
-  const [inventory, setInventory] = useState<Vehicle[]>(() => {
-    const saved = localStorage.getItem('inventory');
-    if (saved) return JSON.parse(saved);
-    return [
-      { id: 1, type: "truck", make: "Freightliner", model: "Cascadia", year: "2019", engine: "Cummins ISX15", vin: "1FUJGLDR5CSBL8266", nickname: "Unit 42" },
-      { id: 2, type: "truck", make: "Kenworth", model: "T680", year: "2021", engine: "PACCAR MX-13", vin: "", nickname: "Big Red" }
-    ];
-  });
+  const [alerts, setAlerts] = useState<Alert[]>([]);
 
-  const [workers, setWorkers] = useState<any[]>(() => {
-    const saved = localStorage.getItem('workers');
-    if (saved) return JSON.parse(saved);
-    return [
-      { id: 1, name: "Marcus Johnson", email: "marcus@fleet.com", status: "active", searches: 47, avatar: "M" },
-      { id: 2, name: "Sarah Chen", email: "sarah@fleet.com", status: "active", searches: 31, avatar: "S" },
-      { id: 3, name: "Derek Williams", email: "derek@fleet.com", status: "pending", searches: 0, avatar: "D" }
-    ];
-  });
+  const fetchAlerts = async () => {
+    const data = await AlertsService.fetchAlerts();
+    setAlerts(data);
+  };
 
+  const markAlertAsRead = async (id: string) => {
+    const success = await AlertsService.markAsRead(id);
+    if (success) {
+      setAlerts(prev => prev.map(a => a.id === id ? { ...a, is_read: true } : a));
+    }
+  };
+
+  const markAllAlertsAsRead = async () => {
+    const success = await AlertsService.markAllAsRead();
+    if (success) {
+      setAlerts(prev => prev.map(a => ({ ...a, is_read: true })));
+    }
+  };
+
+  const deleteAllAlerts = async () => {
+    const success = await AlertsService.deleteAllAlerts();
+    if (success) {
+      setAlerts([]);
+    }
+  };
+
+  useEffect(() => {
+    fetchAlerts();
+    AlertsService.checkMaintenance(); // Check maintenance on load
+
+    // Real-time alerts listener
+    const channel = supabase
+      .channel('alerts-changes')
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'alerts' 
+      }, (payload) => {
+        setAlerts(prev => [payload.new as Alert, ...prev]);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const [inventory, setInventory] = useState<Vehicle[]>([]);
+
+  useEffect(() => {
+    const fetchInventory = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data, error } = await supabase
+            .from('inventory')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false });
+            
+          if (!error && data) {
+            const mappedInventory = data.map(item => ({
+              id: item.id,
+              type: item.type as 'truck' | 'car',
+              make: item.make,
+              model: item.model,
+              year: item.year,
+              engine: item.engine,
+              vin: item.vin,
+              name: item.name,
+              status: item.status,
+              lastService: item.last_service
+            }));
+            setInventory(mappedInventory);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching inventory:', error);
+      }
+    };
+    fetchInventory();
+  }, []);
+
+  const [workers, setWorkers] = useState<any[]>([]);
   const [totalSearches, setTotalSearches] = useState(() => {
     const saved = localStorage.getItem('totalSearches');
     return saved ? parseInt(saved, 10) : 0;
   });
+
+  useEffect(() => {
+    const fetchWorkers = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          // First get the company ID
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('company_id')
+            .eq('id', user.id)
+            .single();
+            
+          if (profile?.company_id) {
+            const { data, error } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('company_id', profile.company_id);
+              
+            if (!error && data) {
+              const mappedWorkers = data.map(item => ({
+                id: item.id,
+                name: item.full_name || 'Worker',
+                email: item.email,
+                role: item.role,
+                status: 'active',
+                joinedAt: item.created_at
+              }));
+              setWorkers(mappedWorkers);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching workers:', error);
+      }
+    };
+    fetchWorkers();
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('currentUser', JSON.stringify(currentUser));
@@ -186,9 +361,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       savedParts, setSavedParts,
       searchHistory, setSearchHistory,
       alerts, setAlerts,
+      fetchAlerts, markAlertAsRead, markAllAlertsAsRead, deleteAllAlerts,
       inventory, setInventory,
       workers, setWorkers,
-      totalSearches, incrementSearches
+      totalSearches, incrementSearches,
+      isOffline, featureFlags
     }}>
       {children}
     </AppContext.Provider>

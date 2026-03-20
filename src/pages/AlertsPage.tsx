@@ -1,38 +1,43 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bell, Search, Trash2, Plus, AlertCircle, CheckCircle2, Clock, DollarSign, Truck, Car, X } from 'lucide-react';
+import { Bell, Trash2, CheckCircle2, Clock, DollarSign, Truck, MailOpen, Mail, ExternalLink } from 'lucide-react';
 import { useAppContext } from '../contexts/AppContext';
+import { AlertsService } from '../services/alertsService';
 
 export default function AlertsPage() {
-  const { alerts, setAlerts } = useAppContext();
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [newAlert, setNewAlert] = useState({
-    partName: '',
-    vehicle: '',
-    priceThreshold: '',
-    type: 'truck' as 'truck' | 'car'
+  const navigate = useNavigate();
+  const { alerts, setAlerts, markAlertAsRead, markAllAlertsAsRead, deleteAllAlerts } = useAppContext();
+  const [filter, setFilter] = useState<'all' | 'unread' | 'read'>('all');
+
+  const filteredAlerts = alerts.filter(alert => {
+    if (filter === 'unread') return !alert.is_read;
+    if (filter === 'read') return alert.is_read;
+    return true;
   });
 
-  const toggleAlert = (id: string) => {
-    setAlerts(alerts.map(a => a.id === id ? { ...a, active: !a.active } : a));
+  const handleDeleteAlert = async (id: string) => {
+    const success = await AlertsService.deleteAlert(id);
+    if (success) {
+      setAlerts(prev => prev.filter(a => a.id !== id));
+    }
   };
 
-  const deleteAlert = (id: string) => {
-    setAlerts(alerts.filter(a => a.id !== id));
+  const handleMarkAllAsRead = async () => {
+    await markAllAlertsAsRead();
   };
 
-  const handleAddAlert = (e: React.FormEvent) => {
-    e.preventDefault();
-    const alert = {
-      id: Math.random().toString(36).substr(2, 9),
-      ...newAlert,
-      priceThreshold: parseFloat(newAlert.priceThreshold),
-      active: true,
-      createdAt: new Date().toISOString()
-    };
-    setAlerts([alert, ...alerts]);
-    setIsAddModalOpen(false);
-    setNewAlert({ partName: '', vehicle: '', priceThreshold: '', type: 'truck' });
+  const handleClearAll = async () => {
+    await deleteAllAlerts();
+  };
+
+  const getAlertIcon = (type: string) => {
+    switch (type) {
+      case 'price_drop': return <DollarSign size={20} className="text-emerald-500" />;
+      case 'maintenance': return <Clock size={20} className="text-amber-500" />;
+      case 'new_part': return <Truck size={20} className="text-brand-primary" />;
+      default: return <Bell size={20} className="text-zinc-500" />;
+    }
   };
 
   return (
@@ -41,42 +46,57 @@ export default function AlertsPage() {
         <div className="space-y-2">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white text-[9px] font-black tracking-[0.2em] uppercase">
             <Bell size={10} className="text-white" />
-            Price Monitoring
+            Notifications Center
           </div>
           <h1 className="text-5xl font-display font-black text-white tracking-tighter leading-none">
-            SMART <span className="text-brand-primary italic">ALERTS.</span>
+            SYSTEM <span className="text-brand-primary italic">ALERTS.</span>
           </h1>
-          <p className="text-zinc-400 font-medium">Get notified instantly when parts hit your target price.</p>
+          <p className="text-zinc-400 font-medium">Real-time updates on price drops, maintenance, and availability.</p>
         </div>
-        <button 
-          onClick={() => setIsAddModalOpen(true)}
-          className="tactile-btn-light px-8 py-4 text-xs font-black uppercase tracking-widest flex items-center gap-2"
-        >
-          <Plus size={16} /> Create New Alert
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleMarkAllAsRead}
+            className="tactile-btn-dark px-6 py-3 text-[10px] font-black uppercase tracking-widest flex items-center gap-2"
+          >
+            <CheckCircle2 size={14} /> Mark All Read
+          </button>
+          <button 
+            onClick={handleClearAll}
+            className="tactile-btn-dark px-6 py-3 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 text-rose-500 hover:bg-rose-500/10"
+          >
+            <Trash2 size={14} /> Clear All
+          </button>
+        </div>
       </header>
 
-      {alerts.length === 0 ? (
+      <div className="flex p-1 bg-white/5 rounded-2xl border border-white/10 w-fit">
+        {(['all', 'unread', 'read'] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+              filter === f ? 'bg-white/10 text-white shadow-glow' : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
+
+      {filteredAlerts.length === 0 ? (
         <div className="tactile-card p-20 text-center border-white/10">
           <div className="w-24 h-24 rounded-3xl bg-white/5 shadow-glass border border-white/10 flex items-center justify-center mx-auto mb-10">
             <Bell size={48} className="text-zinc-500" />
           </div>
-          <h2 className="text-3xl font-display font-black text-white mb-4">No active alerts</h2>
-          <p className="text-zinc-400 mb-12 font-medium max-w-md mx-auto">
-            Set up alerts for specific parts and we'll monitor 40+ suppliers for you 24/7.
+          <h2 className="text-3xl font-display font-black text-white mb-4">No alerts found</h2>
+          <p className="text-zinc-400 font-medium max-w-md mx-auto">
+            You're all caught up! New alerts will appear here as they are generated.
           </p>
-          <button 
-            onClick={() => setIsAddModalOpen(true)}
-            className="tactile-btn-light px-12 py-5 inline-flex items-center gap-3 group"
-          >
-            <Plus size={20} />
-            Create Your First Alert
-          </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
           <AnimatePresence mode="popLayout">
-            {alerts.map((alert, idx) => (
+            {filteredAlerts.map((alert, idx) => (
               <motion.div
                 key={alert.id}
                 layout
@@ -84,48 +104,77 @@ export default function AlertsPage() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 20 }}
                 transition={{ delay: idx * 0.05 }}
-                className={`tactile-card p-6 flex flex-col md:flex-row items-center gap-8 transition-all ${
-                  !alert.active ? 'opacity-50 grayscale' : ''
+                className={`tactile-card p-6 flex flex-col md:flex-row items-center gap-6 transition-all border-l-4 ${
+                  !alert.is_read ? 'bg-brand-primary/5 border-l-brand-primary' : 'border-l-transparent'
                 }`}
               >
-                <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 ${
-                  alert.active ? 'bg-brand-primary/10 border-brand-primary/30 text-brand-primary shadow-glow' : 'bg-white/5 border-white/10 text-zinc-500'
+                <div className={`w-12 h-12 rounded-2xl border flex items-center justify-center shrink-0 ${
+                  !alert.is_read ? 'bg-white/10 border-white/20 shadow-glow' : 'bg-white/5 border-white/10'
                 }`}>
-                  <Bell size={24} />
+                  {getAlertIcon(alert.type)}
                 </div>
 
-                <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-8 w-full">
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Part Name</p>
-                    <h3 className="text-xl font-display font-black text-white">{alert.partName}</h3>
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center gap-3 text-wrap">
+                    <h3 className="text-lg font-display font-black text-white">{alert.title}</h3>
+                    <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest bg-white/5 px-2 py-0.5 rounded border border-white/10 shrink-0">
+                      {new Date(alert.created_at).toLocaleString()}
+                    </span>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Vehicle Target</p>
-                    <p className="text-sm font-bold text-zinc-300 flex items-center gap-2">
-                      {alert.type === 'truck' ? <Truck size={14} /> : <Car size={14} />}
-                      {alert.vehicle}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Target Price</p>
-                    <p className="text-xl font-display font-black text-emerald-400">Under ${alert.priceThreshold.toFixed(2)}</p>
-                  </div>
+                  <p className="text-zinc-400 text-sm font-medium leading-relaxed">{alert.description}</p>
+                  
+                  {alert.metadata && (
+                    <div className="pt-2 flex flex-wrap gap-2">
+                      {alert.type === 'price_drop' && alert.metadata.url && (
+                        <a 
+                          href={alert.metadata.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-[10px] font-black uppercase tracking-widest text-brand-primary hover:underline flex items-center gap-1"
+                        >
+                          <ExternalLink size={12} /> View Part
+                        </a>
+                      )}
+                      {alert.type === 'maintenance' && (
+                        <button 
+                          onClick={() => navigate('/inventory')}
+                          className="text-[10px] font-black uppercase tracking-widest text-brand-primary hover:underline flex items-center gap-1"
+                        >
+                          <Truck size={12} /> View Inventory
+                        </button>
+                      )}
+                      {alert.type === 'new_part' && alert.metadata.url && (
+                        <a 
+                          href={alert.metadata.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-[10px] font-black uppercase tracking-widest text-brand-primary hover:underline flex items-center gap-1"
+                        >
+                          <ExternalLink size={12} /> View Supplier
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-4 shrink-0">
+                <div className="flex items-center gap-3 shrink-0">
+                  {!alert.is_read ? (
+                    <button 
+                      onClick={() => markAlertAsRead(alert.id)}
+                      className="p-3 rounded-xl bg-brand-primary/10 border border-brand-primary/20 text-brand-primary hover:bg-brand-primary/20 transition-all"
+                      title="Mark as read"
+                    >
+                      <Mail size={18} />
+                    </button>
+                  ) : (
+                    <div className="p-3 text-zinc-600">
+                      <MailOpen size={18} />
+                    </div>
+                  )}
                   <button 
-                    onClick={() => toggleAlert(alert.id)}
-                    className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
-                      alert.active 
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' 
-                        : 'bg-white/5 border-white/10 text-zinc-500'
-                    }`}
-                  >
-                    {alert.active ? 'Active' : 'Paused'}
-                  </button>
-                  <button 
-                    onClick={() => deleteAlert(alert.id)}
+                    onClick={() => handleDeleteAlert(alert.id)}
                     className="p-3 rounded-xl bg-white/5 border border-white/10 text-zinc-500 hover:text-rose-500 transition-colors"
+                    title="Delete alert"
                   >
                     <Trash2 size={18} />
                   </button>
@@ -135,107 +184,6 @@ export default function AlertsPage() {
           </AnimatePresence>
         </div>
       )}
-
-      {/* Add Alert Modal */}
-      <AnimatePresence>
-        {isAddModalOpen && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-bg/40 backdrop-blur-md">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="tactile-card w-full max-w-xl border-white/10 relative overflow-hidden"
-            >
-              <div className="absolute top-0 left-0 w-full h-1 bg-brand-primary" />
-              
-              <button 
-                onClick={() => setIsAddModalOpen(false)}
-                className="absolute top-6 right-6 p-3 rounded-2xl bg-white/5 shadow-glass border border-white/10 text-white hover:text-zinc-400 transition-colors z-10"
-              >
-                <X size={20} />
-              </button>
-
-              <form onSubmit={handleAddAlert} className="p-10 space-y-8">
-                <div className="space-y-2">
-                  <h2 className="text-3xl font-display font-black text-white tracking-tighter">Create Alert</h2>
-                  <p className="text-zinc-400 text-sm font-medium">We'll notify you via email and dashboard when found.</p>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Vehicle Category</label>
-                    <div className="flex p-1.5 bg-white/5 rounded-xl border border-white/10 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setNewAlert({ ...newAlert, type: 'truck' })}
-                        className={`flex-1 py-3 rounded-lg flex items-center justify-center gap-2 transition-all ${
-                          newAlert.type === 'truck' ? 'bg-white/10 text-white' : 'text-zinc-500'
-                        }`}
-                      >
-                        <Truck size={14} />
-                        <span className="font-black uppercase tracking-widest text-[10px]">Truck</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setNewAlert({ ...newAlert, type: 'car' })}
-                        className={`flex-1 py-3 rounded-lg flex items-center justify-center gap-2 transition-all ${
-                          newAlert.type === 'car' ? 'bg-white/10 text-white' : 'text-zinc-500'
-                        }`}
-                      >
-                        <Car size={14} />
-                        <span className="font-black uppercase tracking-widest text-[10px]">Car</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Part Name</label>
-                    <input 
-                      type="text"
-                      required
-                      value={newAlert.partName}
-                      onChange={(e) => setNewAlert({ ...newAlert, partName: e.target.value })}
-                      placeholder="e.g. Turbocharger, Brake Pads..."
-                      className="tactile-input w-full py-4 px-4"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Vehicle Details</label>
-                    <input 
-                      type="text"
-                      required
-                      value={newAlert.vehicle}
-                      onChange={(e) => setNewAlert({ ...newAlert, vehicle: e.target.value })}
-                      placeholder="e.g. 2022 Freightliner Cascadia"
-                      className="tactile-input w-full py-4 px-4"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Price Threshold ($)</label>
-                    <div className="relative">
-                      <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-                      <input 
-                        type="number"
-                        required
-                        value={newAlert.priceThreshold}
-                        onChange={(e) => setNewAlert({ ...newAlert, priceThreshold: e.target.value })}
-                        placeholder="0.00"
-                        className="tactile-input w-full py-4 pl-12 pr-4"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <button type="submit" className="tactile-btn-light w-full py-5 text-sm font-black uppercase tracking-widest">
-                  Start Monitoring
-                </button>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

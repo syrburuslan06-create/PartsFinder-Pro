@@ -154,10 +154,10 @@ const requireAuth = async (req: express.Request, res: express.Response, next: ex
       throw new Error('Invalid token');
     }
 
-    // Fetch user profile to get role
+    // Fetch user profile to get role and payment status
     const { data: profile } = await supabase
       .from('profiles')
-      .select('role, is_blocked')
+      .select('role, is_blocked, is_paid, plan')
       .eq('id', user.id)
       .single();
 
@@ -165,7 +165,12 @@ const requireAuth = async (req: express.Request, res: express.Response, next: ex
       return res.status(401).json({ error: 'Account suspended' });
     }
 
-    (req as any).user = { ...user, role: profile ? profile.role : undefined };
+    (req as any).user = { 
+      ...user, 
+      role: profile ? profile.role : undefined,
+      is_paid: profile ? profile.is_paid : false,
+      plan: profile ? profile.plan : 'free'
+    };
     next();
   } catch (err) {
     res.status(401).json({ error: 'Unauthorized' });
@@ -226,7 +231,7 @@ app.post(
             let nextPaymentDate = null;
             if (session.subscription) {
               try {
-                const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
+                const subscription: any = await stripe.subscriptions.retrieve(session.subscription as string);
                 nextPaymentDate = new Date(subscription.current_period_end * 1000).toISOString();
               } catch (e) {
                 console.error("Could not retrieve subscription details", e);
@@ -353,6 +358,18 @@ app.post("/api/auth/login", loginLimiter, async (req, res) => {
     // Successful login
     await logSecurityEvent('successful_login', 'ok', ipAddress, email);
 
+    // Record user session
+    if (supabase) {
+      try {
+        await supabase.from('user_sessions').insert({
+          user_id: data.user.id,
+          started_at: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn("Could not record user session. Migration might be missing.");
+      }
+    }
+
     // Reset failed attempts
     if (supabase && profile && profile.failed_login_attempts > 0) {
       try {
@@ -435,32 +452,55 @@ app.post("/api/ai/analyze-photo", requireAuth, async (req, res) => {
   }
 });
 
-app.post("/api/search", requireAuth, requireRole(['mechanic', 'super_admin']), searchLimiter, async (req, res) => {
+// AI Fallback Cache (Simulating Redis)
+const aiCache = new Map<string, { data: any, timestamp: number }>();
+const CACHE_TTL = 1000 * 60 * 60; // 1 hour
+
+app.post("/api/search", requireAuth, requireRole(['mechanic', 'super_admin', 'individual']), async (req, res, next) => {
+  const user = (req as any).user;
+  
+  // Payment Enforcement
+  if (!user.is_paid && user.role !== 'super_admin') {
+    // Apply strict rate limiting for free users
+    return searchLimiter(req, res, next);
+  }
+  
+  // Paid users get unlimited (or much higher) limits
+  next();
+}, async (req, res) => {
   try {
-    let { vin, partNumber, description } = req.body;
-    
-    // Sanitize inputs
-    if (vin) {
-      vin = sanitizeInput(vin).toUpperCase();
-      if (!validateVIN(vin)) {
-        return res.status(400).json({ error: "Invalid VIN format. Must be exactly 17 alphanumeric characters." });
-      }
-    }
-    
-    if (partNumber) {
-      partNumber = sanitizeInput(partNumber).toUpperCase();
-      if (!validatePartNumber(partNumber)) {
-        return res.status(400).json({ error: "Invalid part number format. Max 50 characters, alphanumeric and dashes only." });
-      }
-    }
-    
-    if (description) {
-      description = sanitizeInput(description);
+    let { vin, partNumber, description, vehicleType } = req.body;
+    const cacheKey = JSON.stringify({ vin, partNumber, description, vehicleType });
+
+    // Layer 1: Redis (Simulated In-Memory Cache)
+    const cached = aiCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
+      console.log("Layer 1: Cache Hit (Redis Simulation)");
+      return res.json({ results: cached.data, source: 'cache_l1' });
     }
 
-    // Perform search logic here (e.g., query database or external API)
-    // For now, return a mock response
-    res.json({ results: [] });
+    // Layer 2: Local DB (Supabase search_cache)
+    const supabase = getSupabaseAdmin();
+    if (supabase) {
+      const { data: dbCached } = await supabase
+        .from('search_cache')
+        .select('results')
+        .eq('query_hash', cacheKey)
+        .single();
+      
+      if (dbCached) {
+        console.log("Layer 2: Cache Hit (Local DB)");
+        aiCache.set(cacheKey, { data: dbCached.results, timestamp: Date.now() });
+        return res.json({ results: dbCached.results, source: 'cache_l2' });
+      }
+    }
+
+    // Layer 3: Partial AI / Full AI (Handled by geminiService on frontend, 
+    // but we can simulate server-side search here if needed)
+    
+    // For now, we'll just return that it's a new search
+    // The frontend will call Gemini and we could theoretically cache it here if the frontend sent it back
+    res.json({ results: [], source: 'live' });
   } catch (error: any) {
     console.error("Search Error:", error);
     res.status(500).json({ error: "An error occurred during search" });

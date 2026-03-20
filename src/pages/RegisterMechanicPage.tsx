@@ -10,6 +10,7 @@ export default function RegisterMechanicPage() {
   const [step, setStep] = useState<'initial' | 'verify-company'>('initial');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -46,7 +47,7 @@ export default function RegisterMechanicPage() {
       });
       if (error) throw error;
       
-      localStorage.setItem('userRole', 'mechanic');
+      localStorage.setItem('userRole', 'worker');
     } catch (error) {
       console.error('Supabase Google login error:', error);
       alert('Failed to initialize Google login. Please ensure Supabase is correctly configured.');
@@ -57,7 +58,7 @@ export default function RegisterMechanicPage() {
     e.preventDefault();
     if (isLoading) return;
     if (!formData.shareLocation) {
-      setError("You must agree to share your location to register as a mechanic for your company.");
+      setError("You must agree to share your location to register as a worker for your company.");
       return;
     }
 
@@ -72,6 +73,27 @@ export default function RegisterMechanicPage() {
       let authUser = null;
       let authSession = null;
       const normalizedEmail = formData.email.toLowerCase().trim();
+      let companyIdToLink = null;
+
+      // If company mode, verify invite code first
+      if (formData.mode === 'company') {
+        if (!formData.inviteCode) {
+          throw new Error('Company invite code is required.');
+        }
+
+        const { data: invite, error: inviteError } = await supabase
+          .from('company_invites')
+          .select('company_id, is_used, expires_at')
+          .eq('code', formData.inviteCode.trim().toUpperCase())
+          .maybeSingle();
+
+        if (inviteError) throw inviteError;
+        if (!invite) throw new Error('Invalid invite code.');
+        if (invite.is_used) throw new Error('This invite code has already been used.');
+        if (new Date(invite.expires_at) < new Date()) throw new Error('This invite code has expired.');
+
+        companyIdToLink = invite.company_id;
+      }
 
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: normalizedEmail,
@@ -79,7 +101,7 @@ export default function RegisterMechanicPage() {
         options: {
           data: {
             full_name: formData.name,
-            role: 'mechanic',
+            role: 'worker',
             specialization: formData.specialization
           }
         }
@@ -129,22 +151,30 @@ export default function RegisterMechanicPage() {
           // Save user profile to Supabase 'profiles' table
           const { error: profileError } = await supabase.from('profiles').insert({
             id: authUser.id,
-            full_name: formData.name || 'Mechanic',
-            role: 'mechanic',
-            company_id: formData.mode === 'company' ? formData.inviteCode : null
+            full_name: formData.name || 'Worker',
+            role: 'worker',
+            company_id: companyIdToLink ? companyIdToLink.toString() : null
           });
 
           if (profileError) {
             console.error("Profile creation error:", profileError);
           }
+
+          // Mark invite as used if applicable
+          if (companyIdToLink) {
+            await supabase
+              .from('company_invites')
+              .update({ is_used: true })
+              .eq('code', formData.inviteCode.trim().toUpperCase());
+          }
         }
 
-        localStorage.setItem('userRole', 'mechanic');
+        localStorage.setItem('userRole', 'worker');
         localStorage.setItem('userEmail', normalizedEmail);
         localStorage.setItem('currentUser', JSON.stringify({
-          name: formData.name || 'Mechanic',
+          name: formData.name || 'Worker',
           email: normalizedEmail,
-          role: 'mechanic'
+          role: 'worker'
         }));
 
         // Request geolocation
@@ -197,15 +227,37 @@ export default function RegisterMechanicPage() {
     }
   };
 
-  const handleVerifyCode = (e: React.FormEvent) => {
+  const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.inviteCode) {
-      alert("Please enter your company invite code.");
+      setError("Please enter your company invite code.");
       return;
     }
-    localStorage.setItem('companyId', formData.inviteCode);
-    localStorage.setItem('isPaid', 'true');
-    navigate('/home');
+    
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const { data: invite, error: inviteError } = await supabase
+        .from('company_invites')
+        .select('company_id, is_used, expires_at')
+        .eq('code', formData.inviteCode.trim().toUpperCase())
+        .maybeSingle();
+
+      if (inviteError) throw inviteError;
+      if (!invite) throw new Error('Invalid invite code.');
+      if (invite.is_used) throw new Error('This invite code has already been used.');
+      if (new Date(invite.expires_at) < new Date()) throw new Error('This invite code has expired.');
+
+      localStorage.setItem('companyId', invite.company_id);
+      localStorage.setItem('isPaid', 'true');
+      setStep('initial');
+      setSuccess("Invite code verified! Please complete your profile.");
+    } catch (err: any) {
+      setError(err.message || 'Verification failed');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -270,8 +322,8 @@ export default function RegisterMechanicPage() {
           {step === 'initial' ? (
             <>
               <div className="mb-8 lg:mb-12">
-                <h2 className="text-4xl lg:text-5xl font-display font-black mb-3 lg:mb-4 text-white tracking-tight">Initialize Profile</h2>
-                <p className="text-zinc-400 font-medium text-base lg:text-lg">Set up your individual identity.</p>
+                <h2 className="text-4xl lg:text-5xl font-display font-black mb-3 lg:mb-4 text-white tracking-tight">Register Worker</h2>
+                <p className="text-zinc-400 font-medium text-base lg:text-lg">Set up your professional identity.</p>
               </div>
 
               <div className="flex p-1 bg-white/5 rounded-2xl border border-white/10 mb-8">
@@ -299,6 +351,15 @@ export default function RegisterMechanicPage() {
                     className="p-4 rounded-xl bg-red-400/10 border border-red-400/20 text-red-400 text-sm font-medium"
                   >
                     {error}
+                  </motion.div>
+                )}
+                {success && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 rounded-xl bg-emerald-400/10 border border-emerald-400/20 text-emerald-400 text-sm font-medium"
+                  >
+                    {success}
                   </motion.div>
                 )}
                 <div className="grid grid-cols-1 gap-6">
@@ -420,7 +481,7 @@ export default function RegisterMechanicPage() {
                   className="tactile-btn-light w-full py-5 text-lg group disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <span className="flex items-center justify-center gap-2">
-                    {isLoading ? 'Processing...' : 'Create Individual Account'}
+                    {isLoading ? 'Processing...' : 'Create Worker Account'}
                     {!isLoading && <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />}
                   </span>
                 </button>

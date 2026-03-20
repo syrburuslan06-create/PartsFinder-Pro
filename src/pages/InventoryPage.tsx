@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Truck, Car, Plus, Search, Trash2, ChevronRight, Settings, Calendar, Hash, Fuel, X } from 'lucide-react';
+import { Truck, Car, Plus, Search, Trash2, ChevronRight, Settings, Calendar, Hash, Fuel, X, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../contexts/AppContext';
+import { supabase } from '../lib/supabase';
 
 export default function InventoryPage() {
   const { inventory, setInventory } = useAppContext();
@@ -18,21 +19,77 @@ export default function InventoryPage() {
     engine: ''
   });
 
-  const deleteVehicle = (id: string) => {
-    setInventory(inventory.filter(v => v.id !== id));
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const deleteVehicle = async (id: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error: deleteError } = await supabase
+        .from('inventory')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', user.id);
+
+      if (deleteError) throw deleteError;
+
+      setInventory(inventory.filter(v => v.id !== id));
+    } catch (err: any) {
+      console.error('Error deleting vehicle:', err);
+      setError(err.message || 'Failed to delete vehicle');
+    }
   };
 
-  const handleAddVehicle = (e: React.FormEvent) => {
+  const handleAddVehicle = async (e: React.FormEvent) => {
     e.preventDefault();
-    const vehicle = {
-      id: Math.random().toString(36).substr(2, 9),
-      ...newVehicle,
-      status: 'active' as const,
-      lastService: new Date().toISOString().split('T')[0]
-    };
-    setInventory([vehicle, ...inventory]);
-    setIsAddModalOpen(false);
-    setNewVehicle({ name: '', type: 'truck', make: '', model: '', year: '', vin: '', engine: '' });
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User not authenticated');
+
+      const vehicleToInsert = {
+        user_id: user.id,
+        ...newVehicle,
+        status: 'active',
+        last_service: new Date().toISOString()
+      };
+
+      const { data, error: insertError } = await supabase
+        .from('inventory')
+        .insert([vehicleToInsert])
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      if (data) {
+        const mappedVehicle = {
+          id: data.id,
+          type: data.type as 'truck' | 'car',
+          make: data.make,
+          model: data.model,
+          year: data.year,
+          engine: data.engine,
+          vin: data.vin,
+          name: data.name,
+          status: data.status,
+          lastService: data.last_service
+        };
+        setInventory([mappedVehicle, ...inventory]);
+      }
+
+      setIsAddModalOpen(false);
+      setNewVehicle({ name: '', type: 'truck', make: '', model: '', year: '', vin: '', engine: '' });
+    } catch (err: any) {
+      console.error('Error adding vehicle:', err);
+      setError(err.message || 'Failed to add vehicle');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSearchForVehicle = (vehicle: any) => {
@@ -181,6 +238,13 @@ export default function InventoryPage() {
                   <p className="text-zinc-400 text-sm font-medium">Register a new vehicle to your fleet inventory.</p>
                 </div>
 
+                {error && (
+                  <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-bold flex items-center gap-2">
+                    <AlertCircle size={14} />
+                    {error}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2 md:col-span-2">
                     <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-2">Vehicle Category</label>
@@ -280,8 +344,12 @@ export default function InventoryPage() {
                   </div>
                 </div>
 
-                <button type="submit" className="tactile-btn-light w-full py-5 text-sm font-black uppercase tracking-widest">
-                  Register Vehicle
+                <button 
+                  type="submit" 
+                  disabled={isSubmitting}
+                  className={`tactile-btn-light w-full py-5 text-sm font-black uppercase tracking-widest ${isSubmitting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isSubmitting ? 'Registering...' : 'Register Vehicle'}
                 </button>
               </form>
             </motion.div>

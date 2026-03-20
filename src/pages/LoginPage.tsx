@@ -46,7 +46,7 @@ export default function LoginPage() {
     navigate('/register');
   };
 
-  const handleDemoLogin = (role: 'mechanic' | 'owner' | 'admin' | 'supplier') => {
+  const handleDemoLogin = (role: 'worker' | 'director' | 'admin' | 'supplier') => {
     setIsLoading(true);
     setError(null);
     
@@ -57,10 +57,10 @@ export default function LoginPage() {
       
       const from = location.state?.from?.pathname;
       
-      if (role === 'mechanic') {
+      if (role === 'worker') {
         localStorage.setItem('isPaid', 'true');
         navigate(from || '/home');
-      } else if (role === 'owner') {
+      } else if (role === 'director') {
         localStorage.setItem('companyId', 'demo-company-123');
         navigate(from || '/owner/dashboard');
       } else if (role === 'supplier') {
@@ -135,11 +135,11 @@ export default function LoginPage() {
 
       // Fallback for demo users
       if (normalizedEmail.startsWith('demo_')) {
-        const role = normalizedEmail.includes('owner') ? 'owner' : normalizedEmail.includes('supplier') ? 'supplier' : 'mechanic';
+        const role = normalizedEmail.includes('director') ? 'director' : normalizedEmail.includes('supplier') ? 'supplier' : 'worker';
         localStorage.setItem('userEmail', normalizedEmail);
         localStorage.setItem('userRole', role);
         localStorage.setItem('currentUser', JSON.stringify({ name: 'Demo User', email: normalizedEmail, role }));
-        if (role === 'owner') {
+        if (role === 'director') {
           localStorage.setItem('companyId', 'demo-company-123');
           navigate(from || '/owner/dashboard');
         } else if (role === 'supplier') {
@@ -214,13 +214,13 @@ export default function LoginPage() {
 
         if (from) {
           navigate(from);
-        } else if (profile.role === 'mechanic') {
+        } else if (profile.role === 'worker') {
           if (profile.company_id || profile.is_paid) {
             navigate('/home');
           } else {
             navigate('/payment');
           }
-        } else if (profile.role === 'owner') {
+        } else if (profile.role === 'director') {
           navigate('/owner/dashboard');
         } else if (profile.role === 'supplier') {
           navigate('/supplier/dashboard');
@@ -386,27 +386,27 @@ export default function LoginPage() {
             <div className="grid grid-cols-3 gap-4 mb-4">
               <button 
                 type="button"
-                onClick={() => handleDemoLogin('mechanic')}
+                onClick={() => handleDemoLogin('worker')}
                 className="tactile-btn-dark py-3 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
               >
                 <Wrench size={14} />
-                Demo Indiv
+                Demo Worker
               </button>
               <button 
                 type="button"
-                onClick={() => handleDemoLogin('owner')}
+                onClick={() => handleDemoLogin('director')}
                 className="tactile-btn-dark py-3 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
               >
                 <UserCog size={14} />
-                Demo Owner
+                Demo Director
               </button>
               <button 
                 type="button"
-                onClick={() => handleDemoLogin('supplier')}
+                onClick={() => handleDemoLogin('admin')}
                 className="tactile-btn-dark py-3 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
               >
                 <Layers size={14} />
-                Demo Suppl
+                Demo Super
               </button>
             </div>
 

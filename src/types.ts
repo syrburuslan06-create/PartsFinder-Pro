@@ -20,6 +20,48 @@ export interface Part {
   image?: string;
 }
 
+export interface ScoringDetails {
+  partNumberMatch: number;
+  priceCompetitiveness: number;
+  supplierReliability: number;
+  historicalSuccess: number;
+  userRating: number;
+  aiConfidence: number;
+}
+
+export interface GeminiSearchResult {
+  partName: string;
+  partNumber: string;
+  compatibility: string;
+  price: string;
+  availability: 'In Stock' | 'Low Stock' | 'Out of Stock';
+  supplier: string;
+  confidence: number;
+  description: string;
+  rating: number;
+  reviewsCount: number;
+  sourceUrl?: string;
+  trustScore: number;
+  scoringDetails: ScoringDetails;
+}
+
+export interface SearchResponse {
+  results: GeminiSearchResult[];
+  groundingMetadata?: any;
+}
+
+export interface VinDetails {
+  year: string;
+  make: string;
+  model: string;
+  engine: string;
+  trim: string;
+  transmission: string;
+  driveType: string;
+  bodyStyle: string;
+  manufacturedIn: string;
+}
+
 export interface SearchResult {
   query: string;
   vehicle: {
@@ -55,10 +97,11 @@ export interface Vehicle {
 
 export interface Alert {
   id: string;
-  type: 'price_drop' | 'back_in_stock';
-  partName: string;
-  partNumber: string;
-  currentPrice: number;
-  status: 'Active' | 'Inactive';
-  createdAt: string;
+  user_id: string;
+  type: 'price_drop' | 'maintenance' | 'new_part';
+  title: string;
+  description: string;
+  is_read: boolean;
+  metadata: any;
+  created_at: string;
 }

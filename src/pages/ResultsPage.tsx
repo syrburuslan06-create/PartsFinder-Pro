@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, 
@@ -16,11 +16,18 @@ import {
   Shield,
   Clock,
   DollarSign,
-  MapPin
+  MapPin,
+  Star,
+  Loader2,
+  Info,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppContext } from '../contexts/AppContext';
 import { supabase } from '../lib/supabase';
+import { searchParts } from '../services/geminiService';
+import { AlertsService } from '../services/alertsService';
+import { GeminiSearchResult } from '../types';
 
 interface SearchState {
   vehicleType: 'truck' | 'car';
@@ -31,6 +38,7 @@ interface SearchState {
   vin?: string;
   partQuery: string;
   hasPhoto: boolean;
+  photoData?: string;
 }
 
 const mockResults = [
@@ -91,8 +99,13 @@ const mockResults = [
 export default function ResultsPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { savedParts, setSavedParts } = useAppContext();
+  const { savedParts, setSavedParts, currentUser, isOffline, featureFlags } = useAppContext();
   const state = location.state as SearchState;
+
+  const [results, setResults] = useState<GeminiSearchResult[]>([]);
+  const [groundingMetadata, setGroundingMetadata] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [stockFilter, setStockFilter] = useState('all');
@@ -100,12 +113,98 @@ export default function ResultsPage() {
   const [supplierFilter, setSupplierFilter] = useState('all');
 
   const [compareList, setCompareList] = useState<string[]>([]);
+  const [showScoringDetails, setShowScoringDetails] = useState<string | null>(null);
+  const [showCompareModal, setShowCompareModal] = useState(false);
+
+  const compareParts = useMemo(() => {
+    return results.filter(r => compareList.includes(r.partNumber));
+  }, [results, compareList]);
+
+  useEffect(() => {
+    const performSearch = async () => {
+      if (!state) return;
+      setIsLoading(true);
+      setError(null);
+      
+      try {
+        // Layer 1 & 2: Check Backend Cache (Redis/DB)
+        if (!isOffline) {
+          const { data: { session } } = await supabase.auth.getSession();
+          const cacheResponse = await fetch('/api/search', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session?.access_token}`
+            },
+            body: JSON.stringify({
+              vin: state.vin,
+              partNumber: state.partQuery, // Use partQuery as partNumber if that's what we have
+              description: state.partQuery,
+              vehicleType: state.vehicleType
+            })
+          });
+
+          if (cacheResponse.ok) {
+            const cacheData = await cacheResponse.json();
+            if (cacheData.results && cacheData.results.length > 0) {
+              console.log(`Search results loaded from ${cacheData.source}`);
+              setResults(cacheData.results);
+              setIsLoading(false);
+              return;
+            }
+          }
+        }
+
+        // Layer 3: Live AI Search (Gemini)
+        if (isOffline) {
+          // Check local storage for this specific search if offline
+          const localCacheKey = `search_${state.vin || state.partQuery}`;
+          const localCached = localStorage.getItem(localCacheKey);
+          if (localCached) {
+            setResults(JSON.parse(localCached));
+            setIsLoading(false);
+            return;
+          }
+          throw new Error('Offline: No cached results found for this search.');
+        }
+
+        const response = await searchParts({
+          vehicleType: state.vehicleType,
+          make: state.make,
+          model: state.model,
+          year: state.year,
+          motor: state.engine,
+          vin: state.vin,
+          description: state.partQuery,
+          image: state.photoData
+        });
+        
+        setResults(response.results);
+        setGroundingMetadata(response.groundingMetadata);
+
+        // Process search results for alerts (price drop, new supplier)
+        AlertsService.processSearchResults(response.results);
+
+        // Cache locally for offline access
+        const localCacheKey = `search_${state.vin || state.partQuery}`;
+        localStorage.setItem(localCacheKey, JSON.stringify(response.results));
+
+      } catch (err: any) {
+        console.error('Search failed:', err);
+        setError(err.message || 'Failed to fetch results. Please try again.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    performSearch();
+  }, [state, isOffline]);
 
   const filteredResults = useMemo(() => {
-    let results = [...mockResults];
+    let filtered = [...results];
 
     if (searchTerm) {
-      results = results.filter(r => 
+      filtered = filtered.filter(r => 
         r.partName.toLowerCase().includes(searchTerm.toLowerCase()) || 
         r.partNumber.toLowerCase().includes(searchTerm.toLowerCase())
       );
@@ -113,29 +212,37 @@ export default function ResultsPage() {
 
     if (stockFilter !== 'all') {
       if (stockFilter === 'in stock') {
-        results.sort((a, b) => (a.stock === 'In Stock' ? -1 : 1));
+        filtered.sort((a, b) => (a.availability === 'In Stock' ? -1 : 1));
       } else {
-        results = results.filter(r => r.stock.toLowerCase().includes(stockFilter));
+        filtered = filtered.filter(r => r.availability.toLowerCase() === stockFilter);
       }
     }
 
     if (supplierFilter !== 'all') {
-      results = results.filter(r => r.supplier === supplierFilter);
+      filtered = filtered.filter(r => r.supplier === supplierFilter);
     }
 
     if (priceSort === 'low') {
-      results.sort((a, b) => a.price - b.price);
+      filtered.sort((a, b) => {
+        const priceA = parseFloat(a.price.replace(/[^0-9.]/g, '')) || 0;
+        const priceB = parseFloat(b.price.replace(/[^0-9.]/g, '')) || 0;
+        return priceA - priceB;
+      });
     } else if (priceSort === 'high') {
-      results.sort((a, b) => b.price - a.price);
+      filtered.sort((a, b) => {
+        const priceA = parseFloat(a.price.replace(/[^0-9.]/g, '')) || 0;
+        const priceB = parseFloat(b.price.replace(/[^0-9.]/g, '')) || 0;
+        return priceB - priceA;
+      });
     }
 
-    return results;
-  }, [searchTerm, stockFilter, priceSort, supplierFilter]);
+    return filtered;
+  }, [results, searchTerm, stockFilter, priceSort, supplierFilter]);
 
-  const handleToggleSave = async (part: any) => {
-    const isSaved = savedParts.some(p => p.id === part.id);
+  const handleToggleSave = async (part: GeminiSearchResult) => {
+    const isSaved = savedParts.some(p => p.partNumber === part.partNumber);
     if (isSaved) {
-      setSavedParts(savedParts.filter(p => p.id !== part.id));
+      setSavedParts(savedParts.filter(p => p.partNumber !== part.partNumber));
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
@@ -145,7 +252,7 @@ export default function ResultsPage() {
         console.error('Error removing saved part:', e);
       }
     } else {
-      const newPart = { ...part, savedAt: new Date().toISOString() };
+      const newPart = { ...part, id: part.partNumber, savedAt: new Date().toISOString() };
       setSavedParts([...savedParts, newPart]);
       try {
         const { data: { user } } = await supabase.auth.getUser();
@@ -154,7 +261,7 @@ export default function ResultsPage() {
             mechanic_id: user.id,
             part_number: part.partNumber,
             part_name: part.partName,
-            price: part.price,
+            price: parseFloat(part.price.replace(/[^0-9.]/g, '')) || 0,
             notes: part.description || ''
           });
         }
@@ -164,16 +271,16 @@ export default function ResultsPage() {
     }
   };
 
-  const handleToggleCompare = (partId: string) => {
+  const handleToggleCompare = (partNumber: string) => {
     setCompareList(prev => {
-      if (prev.includes(partId)) {
-        return prev.filter(id => id !== partId);
+      if (prev.includes(partNumber)) {
+        return prev.filter(id => id !== partNumber);
       }
       if (prev.length >= 3) {
         alert('You can only compare up to 3 parts at a time.');
         return prev;
       }
-      return [...prev, partId];
+      return [...prev, partNumber];
     });
   };
 
@@ -201,6 +308,18 @@ export default function ResultsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-8 pb-20">
+      {/* Offline Banner */}
+      {isOffline && (
+        <motion.div 
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          className="bg-amber-500/10 border-b border-amber-500/20 py-2 px-4 flex items-center justify-center gap-3 text-amber-500 text-xs font-black uppercase tracking-widest"
+        >
+          <AlertCircle size={14} />
+          You are currently offline. Some features may be limited.
+        </motion.div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="space-y-4">
@@ -235,6 +354,11 @@ export default function ResultsPage() {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          {currentUser?.role === 'director' && (
+            <div className="px-4 py-2 rounded-xl bg-brand-primary/10 border border-brand-primary/20 text-brand-primary text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+              <Shield size={12} /> Director Insights Active
+            </div>
+          )}
           <div className="px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
             <CheckCircle2 size={12} /> 40+ Suppliers Scanned
           </div>
@@ -317,10 +441,10 @@ export default function ResultsPage() {
             <option value="PartsMaster">PartsMaster</option>
           </select>
 
-          {compareList.length > 0 && (
+          {featureFlags.enableCompare && compareList.length > 0 && (
             <button 
               className="tactile-btn-light py-3 px-4 text-xs font-black uppercase tracking-widest flex items-center gap-2"
-              onClick={() => alert('Compare feature coming soon!')}
+              onClick={() => setShowCompareModal(true)}
             >
               Compare Selected ({compareList.length})
             </button>
@@ -330,121 +454,325 @@ export default function ResultsPage() {
 
       {/* Results Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <AnimatePresence mode="popLayout">
-          {filteredResults.map((part, idx) => (
-            <motion.div
-              key={part.id}
-              layout
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ delay: idx * 0.05 }}
-              className="tactile-card group overflow-hidden flex flex-col"
-            >
-              <div className="relative h-48 overflow-hidden">
-                <img 
-                  src={part.image} 
-                  alt={part.partName} 
-                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                />
-                <div className="absolute top-4 left-4 flex gap-2">
-                  <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 text-white text-[10px] font-black uppercase tracking-widest cursor-pointer hover:bg-black/60 transition-colors">
-                    <input 
-                      type="checkbox" 
-                      checked={compareList.includes(part.id)}
-                      onChange={() => handleToggleCompare(part.id)}
-                      className="accent-brand-primary"
-                    />
-                    Compare
-                  </label>
-                </div>
-                <div className="absolute top-4 right-4 flex gap-2">
-                  <button 
-                    onClick={() => handleToggleSave(part)}
-                    className={`px-3 py-1.5 rounded-xl backdrop-blur-md border transition-all text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${
-                      savedParts.some(p => p.id === part.id)
-                        ? 'bg-emerald-500 text-white border-emerald-500 shadow-glow'
-                        : 'bg-black/20 text-white border-white/10 hover:bg-black/40'
-                    }`}
-                  >
-                    {savedParts.some(p => p.id === part.id) ? (
-                      <>
-                        <CheckCircle2 size={14} /> Saved ✓
-                      </>
-                    ) : (
-                      <>
-                        <Bookmark size={14} /> Save Part
-                      </>
+        {isLoading ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="tactile-card p-10 border-white/10 animate-pulse space-y-6">
+              <div className="h-48 bg-white/5 rounded-xl" />
+              <div className="space-y-3">
+                <div className="h-8 bg-white/5 rounded w-3/4" />
+                <div className="h-4 bg-white/5 rounded w-1/2" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="h-10 bg-white/5 rounded" />
+                <div className="h-10 bg-white/5 rounded" />
+              </div>
+            </div>
+          ))
+        ) : error ? (
+          <div className="col-span-full py-20 text-center space-y-4">
+            <AlertCircle size={48} className="mx-auto text-red-500" />
+            <p className="text-white font-bold">{error}</p>
+            <button onClick={() => window.location.reload()} className="tactile-btn-light px-6 py-2 text-xs">Retry</button>
+          </div>
+        ) : (
+          <AnimatePresence mode="popLayout">
+            {filteredResults.map((part, idx) => (
+              <motion.div
+                key={part.partNumber}
+                layout
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ delay: idx * 0.05 }}
+                className="tactile-card group overflow-hidden flex flex-col"
+              >
+                <div className="relative h-48 overflow-hidden bg-zinc-900">
+                  <img 
+                    src={`https://picsum.photos/seed/${part.partNumber}/400/300`} 
+                    alt={part.partName} 
+                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 opacity-60"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-bg to-transparent" />
+                  
+                  {/* Trust Score Badge */}
+                  <div className="absolute top-4 left-4 flex flex-col gap-2">
+                    {featureFlags.enableTrustScore && (
+                      <div className={`px-3 py-1.5 rounded-xl backdrop-blur-md border flex items-center gap-2 shadow-glow ${
+                        part.trustScore >= 90 ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' :
+                        part.trustScore >= 75 ? 'bg-amber-500/20 border-amber-500/30 text-amber-400' :
+                        'bg-red-500/20 border-red-500/30 text-red-400'
+                      }`}>
+                        <Shield size={14} />
+                        <span className="text-xs font-black uppercase tracking-widest">Trust: {part.trustScore}%</span>
+                      </div>
                     )}
-                  </button>
-                </div>
-                <div className="absolute bottom-4 left-4">
-                  <div className="px-3 py-1 rounded-lg bg-emerald-500/20 backdrop-blur-md border border-emerald-500/30 text-emerald-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5">
-                    <CheckCircle2 size={12} /> ✓ Compatible
+                    
+                    {featureFlags.enableCompare && (
+                      <label className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/40 backdrop-blur-md border border-white/10 text-white text-[10px] font-black uppercase tracking-widest cursor-pointer hover:bg-black/60 transition-colors w-fit">
+                        <input 
+                          type="checkbox" 
+                          checked={compareList.includes(part.partNumber)}
+                          onChange={() => handleToggleCompare(part.partNumber)}
+                          className="accent-brand-primary"
+                        />
+                        Compare
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="absolute top-4 right-4 flex gap-2">
+                    <button 
+                      onClick={() => handleToggleSave(part)}
+                      className={`px-3 py-1.5 rounded-xl backdrop-blur-md border transition-all text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${
+                        savedParts.some(p => p.partNumber === part.partNumber)
+                          ? 'bg-emerald-500 text-white border-emerald-500 shadow-glow'
+                          : 'bg-black/20 text-white border-white/10 hover:bg-black/40'
+                      }`}
+                    >
+                      {savedParts.some(p => p.partNumber === part.partNumber) ? (
+                        <>
+                          <CheckCircle2 size={14} /> Saved ✓
+                        </>
+                      ) : (
+                        <>
+                          <Bookmark size={14} /> Save
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
+
+                <div className="p-6 space-y-6 flex-1 flex flex-col">
+                  <div className="flex justify-between items-start gap-4">
+                    <div className="space-y-1">
+                      <h3 className="text-xl font-display font-black text-white group-hover:text-brand-primary transition-colors line-clamp-2">
+                        {part.partName}
+                      </h3>
+                      <p className="text-zinc-500 text-xs font-bold font-mono tracking-wider uppercase">PN: {part.partNumber}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-2xl font-display font-black text-white">{part.price}</p>
+                      <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Est. Price</p>
+                    </div>
+                  </div>
+
+                  {/* Scoring Details Mini-Grid */}
+                  {featureFlags.enableTrustScore && (
+                    <div className="grid grid-cols-3 gap-2 py-3 border-y border-white/5">
+                      <div className="text-center">
+                        <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Match</p>
+                        <p className="text-xs font-black text-white">{part.scoringDetails.partNumberMatch}%</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Price</p>
+                        <p className="text-xs font-black text-white">{part.scoringDetails.priceCompetitiveness}%</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Reliability</p>
+                        <p className="text-xs font-black text-white">{part.scoringDetails.supplierReliability}%</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Supplier</p>
+                      <p className="text-sm font-bold text-zinc-200 flex items-center gap-2">
+                        <Truck size={14} className="text-zinc-500" /> {part.supplier}
+                      </p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Availability</p>
+                      <p className={`text-sm font-bold flex items-center gap-2 ${
+                        part.availability === 'In Stock' ? 'text-emerald-400' : 
+                        part.availability === 'Low Stock' ? 'text-amber-400' : 'text-rose-400'
+                      }`}>
+                        <Clock size={14} /> {part.availability}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3 pt-2 mt-auto">
+                    {part.sourceUrl ? (
+                      <a 
+                        href={isOffline ? '#' : part.sourceUrl}
+                        target={isOffline ? undefined : "_blank"}
+                        rel="noopener noreferrer"
+                        onClick={(e) => {
+                          if (isOffline) {
+                            e.preventDefault();
+                            alert('This feature is unavailable while offline.');
+                          }
+                        }}
+                        className={`flex-1 tactile-btn-light py-3 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 ${isOffline ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <ExternalLink size={14} /> View on Site
+                      </a>
+                    ) : (
+                      <button 
+                        onClick={() => {
+                          if (isOffline) {
+                            alert('Cannot request quote while offline.');
+                            return;
+                          }
+                          handleRequestQuote(part);
+                        }}
+                        className={`flex-1 tactile-btn-light py-3 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 ${isOffline ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <MessageSquare size={14} /> Request Quote
+                      </button>
+                    )}
+                    {featureFlags.enableTrustScore && (
+                      <button 
+                        onClick={() => setShowScoringDetails(part.partNumber)}
+                        className="tactile-btn-dark px-4 py-3"
+                      >
+                        <Info size={16} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        )}
+      </div>
+
+      {/* Compare Modal */}
+      <AnimatePresence>
+        {showCompareModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-bg/80 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="tactile-card w-full max-w-5xl p-8 space-y-8 border-white/10"
+            >
+              <div className="flex justify-between items-center">
+                <h3 className="text-3xl font-display font-black text-white uppercase tracking-tight">Compare Parts</h3>
+                <button onClick={() => setShowCompareModal(false)} className="text-zinc-500 hover:text-white transition-colors">
+                  <X size={24} />
+                </button>
               </div>
 
-              <div className="p-6 space-y-6 flex-1 flex flex-col">
-                <div className="flex justify-between items-start gap-4">
-                  <div className="space-y-1">
-                    <h3 className="text-xl font-display font-black text-white group-hover:text-brand-primary transition-colors">
-                      {part.partName}
-                    </h3>
-                    <p className="text-zinc-500 text-xs font-bold font-mono tracking-wider">PN: {part.partNumber}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-2xl font-display font-black text-white">${part.price.toFixed(2)}</p>
-                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">MSRP Estimate</p>
-                  </div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {compareParts.map(part => (
+                  <div key={part.partNumber} className="space-y-6 p-6 rounded-2xl bg-white/5 border border-white/10">
+                    <div className="h-32 rounded-xl overflow-hidden">
+                      <img 
+                        src={`https://picsum.photos/seed/${part.partNumber}/300/200`} 
+                        alt={part.partName} 
+                        className="w-full h-full object-cover opacity-60"
+                      />
+                    </div>
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="text-lg font-display font-black text-white line-clamp-2">{part.partName}</h4>
+                        <p className="text-zinc-500 text-xs font-bold font-mono tracking-widest uppercase">PN: {part.partNumber}</p>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-zinc-500 font-bold uppercase">Price</span>
+                          <span className="text-white font-black">{part.price}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-zinc-500 font-bold uppercase">Trust Score</span>
+                          <span className={`font-black ${
+                            part.trustScore >= 90 ? 'text-emerald-400' :
+                            part.trustScore >= 75 ? 'text-amber-400' : 'text-rose-400'
+                          }`}>{part.trustScore}%</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-zinc-500 font-bold uppercase">Supplier</span>
+                          <span className="text-white font-black">{part.supplier}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-zinc-500 font-bold uppercase">Stock</span>
+                          <span className="text-white font-black">{part.availability}</span>
+                        </div>
+                      </div>
 
-                <div className="grid grid-cols-2 gap-4 py-4 border-y border-white/5">
-                  <div className="space-y-1">
-                    <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Supplier</p>
-                    <p className="text-sm font-bold text-zinc-200 flex items-center gap-2">
-                      <Truck size={14} className="text-zinc-500" /> {part.supplier}
-                    </p>
+                      <button 
+                        onClick={() => handleToggleCompare(part.partNumber)}
+                        className="w-full py-2 text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-rose-500 transition-colors"
+                      >
+                        Remove from Compare
+                      </button>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Availability</p>
-                    <p className={`text-sm font-bold flex items-center gap-2 ${
-                      part.stock === 'In Stock' ? 'text-emerald-400' : 
-                      part.stock === 'Low Stock' ? 'text-amber-400' : 'text-rose-400'
-                    }`}>
-                      <Clock size={14} /> {part.stock}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Location</p>
-                    <p className="text-sm font-bold text-zinc-200 flex items-center gap-2">
-                      <MapPin size={14} className="text-zinc-500" /> {part.location}
-                    </p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Delivery</p>
-                    <p className="text-sm font-bold text-zinc-200 flex items-center gap-2">
-                      <Clock size={14} className="text-zinc-500" /> {part.delivery}
-                    </p>
-                  </div>
-                </div>
+                ))}
+              </div>
 
-                <div className="flex gap-3 pt-2 mt-auto">
-                  <button 
-                    onClick={() => handleRequestQuote(part)}
-                    className="flex-1 tactile-btn-light py-3 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"
-                  >
-                    <MessageSquare size={14} /> Request Quote
-                  </button>
-                  <button className="tactile-btn-dark px-4 py-3">
-                    <ExternalLink size={16} />
-                  </button>
-                </div>
+              <div className="flex justify-end gap-4 pt-4 border-t border-white/5">
+                <button 
+                  onClick={() => setShowCompareModal(false)}
+                  className="tactile-btn-dark px-8 py-3 text-xs font-black uppercase tracking-widest"
+                >
+                  Close
+                </button>
               </div>
             </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Scoring Details Modal */}
+      <AnimatePresence>
+        {showScoringDetails && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-bg/80 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="tactile-card w-full max-w-md p-8 space-y-6 border-white/10"
+            >
+              <div className="flex justify-between items-center">
+                <h3 className="text-2xl font-display font-black text-white uppercase tracking-tight">Trust Score Breakdown</h3>
+                <button onClick={() => setShowScoringDetails(null)} className="text-zinc-500 hover:text-white transition-colors">
+                  <X size={24} />
+                </button>
+              </div>
+
+              {results.find(r => r.partNumber === showScoringDetails) && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center p-4 bg-brand-primary/10 rounded-xl border border-brand-primary/20">
+                    <span className="text-sm font-black text-white uppercase tracking-widest">Total Trust Score</span>
+                    <span className="text-3xl font-display font-black text-brand-primary">
+                      {results.find(r => r.partNumber === showScoringDetails)?.trustScore}%
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    {[
+                      { label: 'Part Number Match', value: results.find(r => r.partNumber === showScoringDetails)?.scoringDetails.partNumberMatch, weight: '30%' },
+                      { label: 'Price Competitiveness', value: results.find(r => r.partNumber === showScoringDetails)?.scoringDetails.priceCompetitiveness, weight: '20%' },
+                      { label: 'Supplier Reliability', value: results.find(r => r.partNumber === showScoringDetails)?.scoringDetails.supplierReliability, weight: '20%' },
+                      { label: 'Historical Success', value: results.find(r => r.partNumber === showScoringDetails)?.scoringDetails.historicalSuccess, weight: '10%' },
+                      { label: 'User Rating', value: results.find(r => r.partNumber === showScoringDetails)?.scoringDetails.userRating, weight: '10%' },
+                      { label: 'AI Confidence', value: results.find(r => r.partNumber === showScoringDetails)?.scoringDetails.aiConfidence, weight: '10%' },
+                    ].map((item, i) => (
+                      <div key={i} className="space-y-1">
+                        <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
+                          <span className="text-zinc-500">{item.label} <span className="text-[8px] opacity-50">({item.weight})</span></span>
+                          <span className="text-white">{item.value}%</span>
+                        </div>
+                        <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                          <motion.div 
+                            initial={{ width: 0 }}
+                            animate={{ width: `${item.value}%` }}
+                            className="h-full bg-zinc-500"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {filteredResults.length === 0 && (
         <div className="text-center py-20 space-y-4">
